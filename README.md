@@ -6,6 +6,8 @@
 
 ![DSH 右侧栏中的「小说书架」面板](docs/screenshot-right-panel.png)
 
+![DSH 整体界面，右侧栏打开「小说书架」](docs/screenshot-full.png)
+
 ## 功能 / Features
 
 - **右侧栏阅读**：作为 DSH 原生右栏标签打开，不开新窗口、不切应用。

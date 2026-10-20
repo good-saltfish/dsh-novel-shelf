@@ -6,6 +6,8 @@ Read local txt novels inside the DSH (DeepSeek Harness) right sidebar.
 
 ![The "小说书架 / Novel Shelf" panel in the DSH right sidebar](docs/screenshot-right-panel.png)
 
+![The whole DSH window with the "小说书架 / Novel Shelf" tab open in the right sidebar](docs/screenshot-full.png)
+
 ## Features
 
 - **Right-sidebar reading**: opens as a native DSH right-sidebar tab — no new window, no app switch.
