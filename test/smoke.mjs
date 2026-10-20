@@ -183,7 +183,7 @@ const { createRequire } = await import('node:module');
 createRequire(import.meta.url)(tmp);
 
 assert.equal(loaded.length, 1, 'client.js must call __ModuleLoader__.load once');
-assert.equal(loaded[0].id, 'dsh-novel-reader');
+assert.equal(loaded[0].id, 'dsh-novel-shelf');
 const mod = loaded[0].loaded;
 assert.ok(mod, 'factory must return module.exports (Loader contract)');
 assert.equal(typeof mod.apply, 'function', 'must export apply');
@@ -283,11 +283,11 @@ mod.apply(ctx);
 
 assert.equal(tabTypes.length, 1, 'right-sidebar tab type must be registered on first apply');
 const tab = tabTypes[0];
-assert.equal(tab.id, 'dsh-novel-reader/reader');
+assert.equal(tab.id, 'dsh-novel-shelf/reader');
 assert.ok(tab.kind && tab.kind !== tab.id, 'kind 与 id 必须是两个不同字符串');
 assert.ok(Array.isArray(tab.guide) && tab.guide.length === 1, 'guide entry required');
 assert.equal(tab.guide[0].id, tab.id, 'guide 条目必须带 id，否则宿主静默降级');
-assert.equal(tab.title(), '小说阅读器', '标题必须是中文');
+assert.equal(tab.title(), '小说书架', '标题必须是中文');
 
 /* 座位必须经 slots.inject 挂载，且在属主 dispatch 后才占位。 */
 assert.equal(

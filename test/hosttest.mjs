@@ -32,7 +32,7 @@ assert.equal(typeof handler, 'function', 'host must register a route');
 async function post(method, body, headers = {}) {
   const req = Readable.from([Buffer.from(JSON.stringify(body ?? {}), 'utf8')]);
   req.method = 'POST';
-  req.url = `/novel-reader/api/${method}`;
+  req.url = `/novel-shelf/api/${method}`;
   req.headers = { 'sec-fetch-site': 'same-origin', ...headers };
   const res = { setHeader() {}, end(t) { this.text = String(t); } };
   await handler(req, res);
@@ -125,7 +125,7 @@ ctx.connection.requestRejection = () => undefined;
 
 const bigReq = Readable.from([Buffer.alloc(1024 * 1024 + 16, 0x20)]);
 bigReq.method = 'POST';
-bigReq.url = '/novel-reader/api/library.get';
+bigReq.url = '/novel-shelf/api/library.get';
 bigReq.headers = { 'sec-fetch-site': 'same-origin' };
 const bigRes = { setHeader() {}, end() {} };
 await handler(bigReq, bigRes);
@@ -133,7 +133,7 @@ assert.equal(bigRes.statusCode, 413, '超限 body 必须被拒');
 
 const getReq = Readable.from([]);
 getReq.method = 'GET';
-getReq.url = '/novel-reader/api/library.get';
+getReq.url = '/novel-shelf/api/library.get';
 getReq.headers = { 'sec-fetch-site': 'same-origin' };
 const getRes = { setHeader() {}, end() {} };
 await handler(getReq, getRes);

@@ -1,5 +1,5 @@
 {
-  "name": "dsh-novel-reader",
+  "name": "dsh-novel-shelf",
   "version": "0.1.0",
   "description": "在 DSH 右侧栏里读本地 txt 小说，与 novel-reader 共用书架、批注和阅读进度。",
   "type": "module",
@@ -52,10 +52,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/good-saltfish/dsh-novel-reader.git"
+    "url": "https://github.com/good-saltfish/dsh-novel-shelf.git"
   },
-  "homepage": "https://github.com/good-saltfish/dsh-novel-reader#readme",
+  "homepage": "https://github.com/good-saltfish/dsh-novel-shelf#readme",
   "bugs": {
-    "url": "https://github.com/good-saltfish/dsh-novel-reader/issues"
+    "url": "https://github.com/good-saltfish/dsh-novel-shelf/issues"
   }
 }

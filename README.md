@@ -1,4 +1,4 @@
-# dsh-novel-reader
+# dsh-novel-shelf
 
 在 DSH（DeepSeek Harness）右侧栏里直接读本地 txt 小说。English version: [README.en.md](README.en.md)
 
@@ -19,21 +19,21 @@
 ## 安装 / Install
 
 ```sh
-dsh plugin --profile desktop add good-saltfish/dsh-novel-reader
+dsh plugin --profile desktop add good-saltfish/dsh-novel-shelf
 ```
 
 或从源码目录安装：
 
 ```sh
-git clone https://github.com/good-saltfish/dsh-novel-reader
+git clone https://github.com/good-saltfish/dsh-novel-shelf
 dsh plugin --profile desktop add link:<仓库路径>
 ```
 
-装完**刷新 DSH 页面**（client 半边随页面加载），右栏即可看到「小说阅读器」标签。
+装完**刷新 DSH 页面**（client 半边随页面加载），右栏即可看到「小说书架」标签。
 
 ## 使用 / Usage
 
-1. 右栏点开「小说阅读器」→ 书架页。
+1. 右栏点开「小说书架」→ 书架页。
 2. 输入本地 txt 文件的**绝对路径**（如 `D:\books\foo.txt`），回车加入书架。
 3. 点书名打开；顶部可翻章、开关目录、搜索全书；底部可调字号与背景配色。
 

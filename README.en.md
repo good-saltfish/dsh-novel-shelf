@@ -1,4 +1,4 @@
-# dsh-novel-reader
+# dsh-novel-shelf
 
 Read local txt novels inside the DSH (DeepSeek Harness) right sidebar.
 
@@ -17,21 +17,21 @@ Read local txt novels inside the DSH (DeepSeek Harness) right sidebar.
 ## Install
 
 ```sh
-dsh plugin --profile desktop add good-saltfish/dsh-novel-reader
+dsh plugin --profile desktop add good-saltfish/dsh-novel-shelf
 ```
 
 Or from a checkout:
 
 ```sh
-git clone https://github.com/good-saltfish/dsh-novel-reader
+git clone https://github.com/good-saltfish/dsh-novel-shelf
 dsh plugin --profile desktop add link:<repo path>
 ```
 
-**Refresh the DSH page** after installing (the client half loads with the page); a "小说阅读器 / Novel Reader" tab then appears in the right sidebar.
+**Refresh the DSH page** after installing (the client half loads with the page); a "小说书架 / Novel Shelf" tab then appears in the right sidebar.
 
 ## Usage
 
-1. Open the "小说阅读器" tab in the right sidebar — the shelf.
+1. Open the "小说书架" tab in the right sidebar — the shelf.
 2. Type the **absolute path** of a local txt file (e.g. `D:\books\foo.txt`) and press Enter to add it.
 3. Click a title to read. The top bar switches chapters, toggles the table of contents and searches the book; the bottom bar adjusts font size and background.
 

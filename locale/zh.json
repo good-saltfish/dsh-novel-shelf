@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "小说阅读器",
+    "title": "小说书架",
     "description": "在 DSH 右侧栏里读本地 txt 小说，与 novel-reader 共用书架、批注和阅读进度。"
   }
 }
