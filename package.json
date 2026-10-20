@@ -1,0 +1,58 @@
+{
+  "name": "dsh-novel-reader",
+  "version": "0.1.0",
+  "description": "在 DSH 右侧栏里读本地 txt 小说，与 novel-reader 共用书架、批注和阅读进度。",
+  "type": "module",
+  "main": "./lib/host.js",
+  "exports": {
+    ".": "./lib/host.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/en.json": "./locale/en.json",
+    "./locale/zh.json": "./locale/zh.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "lib",
+    "locale",
+    "icon.svg",
+    "cordis.patch.yml"
+  ],
+  "engines": {
+    "node": ">=20",
+    "dsh": ">=0.2.0-rc.2"
+  },
+  "scripts": {
+    "test": "node test/hosttest.mjs && node test/smoke.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ]
+    }
+  },
+  "license": "MIT",
+  "author": "good-saltfish",
+  "keywords": [
+    "dsh-plugin",
+    "dsh",
+    "novel",
+    "reader",
+    "sidebar"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/good-saltfish/dsh-novel-reader.git"
+  },
+  "homepage": "https://github.com/good-saltfish/dsh-novel-reader#readme",
+  "bugs": {
+    "url": "https://github.com/good-saltfish/dsh-novel-reader/issues"
+  }
+}
