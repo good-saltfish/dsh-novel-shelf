@@ -16,7 +16,10 @@
     "lib",
     "locale",
     "icon.svg",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20",
