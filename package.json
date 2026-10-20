@@ -19,7 +19,9 @@
     "cordis.patch.yml",
     "README.md",
     "README.en.md",
-    "LICENSE"
+    "LICENSE",
+    "screenshots.json",
+    "docs"
   ],
   "engines": {
     "node": ">=20",
