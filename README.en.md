@@ -1,6 +1,6 @@
 # dsh-novel-shelf
 
-Read local txt novels inside the DSH (DeepSeek Harness) right sidebar.
+**Office-sloof reading**: keep a local txt novel in the DSH (DeepSeek Harness) right sidebar while you keep working on your project.
 
 ![plugin](https://img.shields.io/badge/dsh--plugin-4d6bfe)
 
@@ -10,7 +10,7 @@ Read local txt novels inside the DSH (DeepSeek Harness) right sidebar.
 
 ## Features
 
-- **Right-sidebar reading**: opens as a native DSH right-sidebar tab — no new window, no app switch.
+- **Right-sidebar reading**: opens as a native DSH right-sidebar tab — no new window, no app switch. Your project stays on screen while the novel rides along.
 - **Local txt shelf**: add books by absolute path; the plugin only reads files, never uploads them.
 - **Chapter splitting**: recognises `第 N 章 / 节 / 回 / 卷 / 篇` headings, with a length-based fallback.
 - **Encoding detection**: UTF-8 / UTF-8 BOM / UTF-16LE / UTF-16BE / GB18030.

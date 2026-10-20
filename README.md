@@ -1,6 +1,6 @@
 # dsh-novel-shelf
 
-在 DSH（DeepSeek Harness）右侧栏里直接读本地 txt 小说。English version: [README.en.md](README.en.md)
+**办公摸鱼专用**：在 DSH（DeepSeek Harness）右侧栏里看本地 txt 小说，边看小说边做项目。English version: [README.en.md](README.en.md)
 
 ![plugin](https://img.shields.io/badge/dsh--plugin-4d6bfe)
 
@@ -10,7 +10,7 @@
 
 ## 功能 / Features
 
-- **右侧栏阅读**：作为 DSH 原生右栏标签打开，不开新窗口、不切应用。
+- **右侧栏阅读**：作为 DSH 原生右栏标签打开，不开新窗口、不切应用，主界面继续留着你的项目，小说和干活同时进行。
 - **本地 txt 书架**：按绝对路径加入书架，插件只读取文件，不上传、不外发。
 - **章节切分**：识别「第 N 章 / 节 / 回 / 卷 / 篇」标题；识别不到时按长度分段兜底。
 - **编码探测**：UTF-8 / UTF-8 BOM / UTF-16LE / UTF-16BE / GB18030 自动判定。
