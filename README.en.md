@@ -131,6 +131,25 @@ gh release upload v0.1.1 dsh-novel-shelf-0.1.1.tgz --repo good-saltfish/dsh-nove
 
 Name the release asset with its version (`dsh-novel-shelf-<version>.tgz`) and reference it from the catalog entry with a pinned path `releases/download/v<version>/<asset>`, so `latest/download/` does not 404 on the next release.
 
+### After submitting to the market: that red check will not clear on its own
+
+`Submission gate` blocks repositories younger than one day. That is a hard rule and it passes once the day is up. But **the verdict is a snapshot, and it is only recomputed on push**.
+
+There is a `regate.yml` that re-runs red gates every six hours, but it caps each pass at `MAX_RERUNS=20` and works through pull requests in ascending number order. Pull request numbers in this list are already past eight thousand and the queue is long, so yours is very likely beyond the cap — the "clears in about 24h" promise does not hold for a pull request at the tail, and the red just sits there with nothing pushing it.
+
+So once the repository is a day old, **push an empty commit to your fork branch** to trigger a re-run:
+
+```sh
+git commit --allow-empty -m "chore: re-trigger the submission gate (repository is now a day old)"
+git -c http.version=HTTP/1.1 push origin <branch>
+```
+
+The empty commit changes no file; it only asks CI to judge again. If the age bar is met the gate turns green at once and the PR moves from `UNSTABLE` to `CLEAN`.
+
+If a push fails with `Recv failure: Connection was reset`, add `-c http.version=HTTP/1.1` — that fixes it in practice.
+
+One more thing: merging is a maintainer's manual act. With everything green and no review, the PR is simply waiting in the queue, and a polite comment on the PR is the only legitimate way to move it along. Until the entry lands on upstream `main`, the market cannot find it — the market reads `data/plugins/*.yml`, and anything not on `main` is a 404.
+
 ## License
 
 MIT

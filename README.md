@@ -131,6 +131,25 @@ gh release upload v0.1.1 dsh-novel-shelf-0.1.1.tgz --repo good-saltfish/dsh-nove
 
 Release 资产名建议带版本号（`dsh-novel-shelf-<版本>.tgz`），目录条目里用固定版本路径 `releases/download/v<版本>/<资产名>`，避免 `latest/download/` 在下个版本时 404。
 
+### 提交到插件市场后：那个红灯不会自己变绿
+
+`Submission gate` 会卡仓库年龄 1 天，这是硬门槛，过了就行。但**它是快照式的，只在 push 时重跑**。
+
+理论上有个 `regate.yml` 每 6 小时重跑一次红灯，但它有 `MAX_RERUNS=20` 上限、且按 PR 号升序处理。这个目录现在编号已到八千多、排队很长，你的 PR 极可能排在 20 名之外 —— 于是"约 24 小时后自动转绿"这句话对队列尾部不成立，红灯会一直挂着没人推。
+
+所以仓库满 1 天后，**自己往 fork 分支推一个空 commit** 触发一次重跑：
+
+```sh
+git commit --allow-empty -m "chore: re-trigger the submission gate (repository is now a day old)"
+git -c http.version=HTTP/1.1 push origin <分支名>
+```
+
+空 commit 不改任何文件，只是让 CI 重新判定一次 —— 年龄够了就立刻转绿，PR 状态从 `UNSTABLE` 变 `CLEAN`。
+
+推不上 GitHub（`Recv failure: Connection was reset`）时加 `-c http.version=HTTP/1.1`，实测能治。
+
+另外：合并是维护者的手动动作。全绿之后没人 review 就只是排队，PR 下留一句礼貌的评论是唯一合规的推进方式。条目合进 upstream `main` 之前，插件市场搜不到 —— 市场读的是 `data/plugins/*.yml`，不在 `main` 上就是 404。
+
 ## License
 
 MIT
