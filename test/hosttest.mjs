@@ -16,6 +16,25 @@ process.env.APPDATA = sandbox;
 const dataDir = path.join(sandbox, 'novel-reader');
 await fs.mkdir(path.join(dataDir, 'annotations'), { recursive: true });
 
+/* 内置书目：bundle 里的 books/ 用一个独立沙箱顶上（环境变量覆盖），
+ * 这样单测不依赖真实仓库里的 7.3MB 小说。 */
+const bundleBooks = path.join(sandbox, 'bundle-books');
+await fs.mkdir(bundleBooks, { recursive: true });
+const BUNDLED_NAMES = [
+  '十日终焉 - 杀虫队队员.txt',
+  '我在精神病院学斩神 - 三九音域.txt',
+  '我不是戏神 - 三九音域.txt',
+];
+for (const name of BUNDLED_NAMES) {
+  await fs.writeFile(path.join(bundleBooks, name), [
+    '书名：' + name.replace(/\.txt$/, ''), '作者：测试', '【简介】', '内置书目测试副本。', '',
+    '第一章 开头', '正文一。', '',
+    '第二章 承接', '正文二。', '',
+    '第三章 收束', '正文三。', '',
+  ].join('\n'), 'utf8');
+}
+process.env.NOVEL_SHELF_BOOKS_DIR = bundleBooks;
+
 const mod = await import('../lib/host.js');
 
 let handler = null;
@@ -45,6 +64,15 @@ const ok = async (m, b) => {
   return r.json.value;
 };
 
+async function fileExists(file) {
+  try {
+    await fs.stat(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const bookPath = path.join(sandbox, '测试小说.txt');
 await fs.writeFile(bookPath, [
   '书名：测试小说', '作者：某人', '【简介】', '简介一行。', '',
@@ -52,8 +80,41 @@ await fs.writeFile(bookPath, [
   '第二章 继续', '第三章 内容', '关键词在这里。', '更多正文。',
 ].join('\n'), 'utf8');
 
+/* 内置书目：首次读取书架时自动装入 */
+{
+  await fs.rm(path.join(dataDir, 'books.json'), { force: true });
+  const first = await ok('library.get');
+  assert.equal(first.bundled, BUNDLED_NAMES.length, 'library.get 必须报告内置书目数');
+  assert.equal(first.books.length, BUNDLED_NAMES.length, '内置书目必须自动装进书架');
+  for (const name of BUNDLED_NAMES) {
+    assert.ok(first.books.some((b) => b.name === name), '缺少内置书目：' + name);
+  }
+  /* 路径必须落在插件数据目录，绝不写死本机绝对路径 */
+  for (const b of first.books) {
+    assert.ok(b.path.startsWith(dataDir + path.sep), '内置书目必须在数据目录内：' + b.path);
+    assert.ok(await fileExists(b.path), '副本必须已落盘：' + b.path);
+  }
+  /* 幂等：再读一次不得重复 */
+  const second = await ok('library.get');
+  assert.equal(second.books.length, BUNDLED_NAMES.length, '重复读取不得重复装入');
+  /* 副本在磁盘上：打开第一本必须真的能读 */
+  const bundled = first.books[0];
+  const openedBundled = await ok('book.open', { path: bundled.path });
+  assert.equal(openedBundled.chapters.length, 4, '内置书目副本必须可读（简介 + 3 章）');
+  /* 移除后不会自己回来 */
+  await ok('library.remove', { id: bundled.id });
+  const afterRemove = await ok('library.get');
+  assert.equal(afterRemove.books.length, BUNDLED_NAMES.length - 1, '移除一本内置书后不得自动补回');
+  /* 把剩下的也移除，让「已移除名单」挡住全部内置书目，
+   * 这样后面的断言面对的是一个干净的空书架（removed-bundled.json 必须留着）。 */
+  for (const b of afterRemove.books) await ok('library.remove', { id: b.id });
+  assert.equal((await ok('library.get')).books.length, 0, '全部移除后书架应为空');
+  await fs.rm(path.join(dataDir, 'books.json'), { force: true });
+  await fs.rm(path.join(dataDir, 'books'), { recursive: true, force: true });
+}
+
 /* 书架 */
-assert.deepEqual((await ok('library.get')).books, []);
+assert.deepEqual((await ok('library.get')).books, [], '沙箱里没有任何预置书目');
 const added = await ok('library.add', { path: bookPath });
 assert.equal(added.added, true);
 assert.equal(added.books.length, 1);
