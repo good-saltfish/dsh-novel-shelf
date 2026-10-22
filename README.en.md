@@ -12,6 +12,7 @@
 
 - **Right-sidebar reading**: opens as a native DSH right-sidebar tab — no new window, no app switch. Your project stays on screen while the novel rides along.
 - **Local txt shelf**: add books by absolute path; the plugin only reads files, never uploads them.
+- **Three books built in**: 《十日终焉》, 《我在精神病院学斩神》 and 《我不是戏神》 land on the shelf automatically the first time you open the sidebar — no file hunting, no path config. Remove them if you want; they stay removed.
 - **Chapter splitting**: recognises `第 N 章 / 节 / 回 / 卷 / 篇` headings, with a length-based fallback.
 - **Encoding detection**: UTF-8 / UTF-8 BOM / UTF-16LE / UTF-16BE / GB18030.
 - **Full-text search**: matches within chapters and reports the chapter name plus a context snippet.
@@ -19,6 +20,16 @@
 - **Five colour schemes**: white / eye-care green / sepia / dark grey / pure black, matching novel-reader's `body[data-theme]` names and colours.
 - **Shares data with novel-reader**: reads and writes `books.json`, `settings.json` and `annotations/*.json` under `%APPDATA%/novel-reader`, so theme and progress stay in sync with the desktop app.
 - **Zero runtime dependencies**: only Node built-ins and services the DSH host already provides. No third-party dependency, no network request.
+
+### How the bundled books work
+
+The bundle ships a `books/` directory (about 7.3 MB, three txt files). The plugin **never writes a machine-local `D:\...` absolute path into the shelf** — on another machine that path does not exist and the shelf breaks. So instead:
+
+1. On the first shelf read (`library.get`), the host side checks which bundled books are missing from `books.json`.
+2. The missing ones are **copied** out of the bundle's `books/` into `%APPDATA%/novel-reader/books/<title>.txt`.
+3. That **in-data-dir copy path** is what goes into `books.json`, so the shelf shows them.
+
+Three hard rules: idempotent (dedup by title, never added twice), never breaks the shelf (a failed copy only logs a `console.warn`), and **once you delete a bundled book it stays deleted** (its title is recorded in `removed-bundled.json`). Tests point the bundle directory at a sandbox via the `NOVEL_SHELF_BOOKS_DIR` environment variable, so the unit tests do not depend on the real novels in the repo.
 
 ## Install
 
@@ -53,11 +64,12 @@ dsh plugin --profile desktop add file:<tgz path>
 
 1. **Open the right sidebar**: click the right-column button in the top-right of the DSH window.
 2. **Pick the "小说书架" tab**: choose it in the tab bar at the top of the right sidebar to reach the shelf.
-3. **Add a book**: type the **absolute path** of a local txt file (e.g. `D:\books\foo.txt`) in the input box and press Enter. The title shows up in the list.
-4. **Start reading**: click a title — the chapter text appears directly in the right sidebar.
-5. **Navigate**: "上一章 / 下一章" switch chapters, the catalogue button next to the title opens the chapter list, and the search box runs a full-text search over the book (press Enter; a hit reports the chapter name plus a context snippet).
-6. **Tune the page**: the bottom slider changes the font size, the five swatches switch the background (white / eye-care / sepia / dark grey / pure black).
-7. **Progress is saved for you**: the chapter index and scroll ratio are written to `%APPDATA%/novel-reader/annotations/<id>.json`, so reopening lands you where you left off.
+3. **Three books are already there**: on the first open the bundled 《十日终焉》, 《我在精神病院学斩神》 and 《我不是戏神》 are copied out of the plugin and added to the shelf automatically. Click one to start reading right away.
+4. **Add more books**: type the **absolute path** of a local txt file (e.g. `D:\books\foo.txt`) in the input box and press Enter. The title shows up in the list.
+5. **Start reading**: click a title — the chapter text appears directly in the right sidebar.
+6. **Navigate**: "上一章 / 下一章" switch chapters, the catalogue button next to the title opens the chapter list, and the search box runs a full-text search over the book (press Enter; a hit reports the chapter name plus a context snippet).
+7. **Tune the page**: the bottom slider changes the font size, the five swatches switch the background (white / eye-care / sepia / dark grey / pure black).
+8. **Progress is saved for you**: the chapter index and scroll ratio are written to `%APPDATA%/novel-reader/annotations/<id>.json`, so reopening lands you where you left off.
 
 > The right sidebar is narrow — widen the window for a more comfortable reading column.
 
@@ -78,6 +90,8 @@ Useful background if you want to modify the plugin yourself:
 | File | Content |
 | --- | --- |
 | `%APPDATA%/novel-reader/books.json` | Shelf (path, name, size, added time) |
+| `%APPDATA%/novel-reader/books/` | Local copies of the three bundled books (copied out of the bundle on first shelf read) |
+| `%APPDATA%/novel-reader/removed-bundled.json` | Titles of bundled books you removed — they are never auto-installed again |
 | `%APPDATA%/novel-reader/settings.json` | Theme, font size, line height, last read book |
 | `%APPDATA%/novel-reader/annotations/<id>.json` | Highlights and reading progress per book |
 | `%APPDATA%/novel-reader/plugin-client.log` | Runtime diagnostics of the client half (tags and counters only, no text) |
@@ -99,6 +113,7 @@ When a JSON file is corrupt the plugin first backs it up as `*.corrupt-<timestam
 ```
 lib/host.js            host half: file IO, encoding detection, chapter splitting, full-text search, JSON persistence, HTTP route
 lib/client.js          client half: right-sidebar tab registration, shelf and reader components, five theme palettes
+books/                 the three bundled txt files (~7.3 MB, shipped with the bundle, copied to the data dir on first run)
 locale/zh.json         Chinese strings
 locale/en.json         English strings
 test/hosttest.mjs      host-half unit tests
