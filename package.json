@@ -1,6 +1,6 @@
 {
   "name": "dsh-novel-shelf",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "在 DSH 右侧栏里摸鱼看本地 txt 小说，自带《十日终焉》《我在精神病院学斩神》《我不是戏神》三本，边看小说边做项目，章节、进度和主题与桌面版 novel-reader 共用。",
   "type": "module",
   "main": "./lib/host.js",
