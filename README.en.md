@@ -20,6 +20,7 @@
 - **Five colour schemes**: white / eye-care green / sepia / dark grey / pure black, matching novel-reader's `body[data-theme]` names and colours.
 - **Shares data with novel-reader**: reads and writes `books.json`, `settings.json` and `annotations/*.json` under `%APPDATA%/novel-reader`, so theme and progress stay in sync with the desktop app.
 - **Zero runtime dependencies**: only Node built-ins and services the DSH host already provides. No third-party dependency, no network request.
+- **AI reading companion (off by default)**: once switched on, the AI roasts whatever you just read every few minutes, in four styles (roast / warm / detective / slacker), or on demand with "say it now". Off means the model is never called. See [docs/ai-companion.md](docs/ai-companion.md).
 
 ### How the bundled books work
 

@@ -37,9 +37,23 @@ process.env.NOVEL_SHELF_BOOKS_DIR = bundleBooks;
 
 const mod = await import('../lib/host.js');
 
+/* 陪读桩：llm.stream 按增量吐字，agentDefaultModel 报一个默认选择。
+ * 这两个服务在真实宿主里由 DSH 提供，桩按 apply 里 inject 声明提供同名属性。 */
+const llmCalls = [];
+const fakeLlm = {
+  async *stream(spec) {
+    llmCalls.push(spec);
+    yield { type: 'text-delta', text: '这一段有点东西，' };
+    yield { type: 'text-delta', text: '但不多。' };
+  },
+};
+const fakeDefaultModel = { currentSelection: () => ({ provider: 'deepseek', model: 'deepseek-chat' }) };
+
 let handler = null;
 const ctx = {
   connection: { requestRejection: () => undefined },
+  llm: fakeLlm,
+  agentDefaultModel: fakeDefaultModel,
   effect(fn) { const d = fn(); return () => { if (typeof d === 'function') d(); }; },
   webServer: {
     register(route) { handler = route.handler; return () => { handler = null; }; },
@@ -47,6 +61,11 @@ const ctx = {
 };
 mod.apply(ctx);
 assert.equal(typeof handler, 'function', 'host must register a route');
+
+/* 陪读依赖的两个服务必须显式 inject：不声明的话 cordis 未注入属性访问会抛，
+ * optionalService 只能吞掉 → 模型永远读不到 → 陪读一次都触发不了。 */
+assert.ok(mod.inject.includes('llm'), 'host 必须 inject llm');
+assert.ok(mod.inject.includes('agentDefaultModel'), 'host 必须 inject agentDefaultModel');
 
 async function post(method, body, headers = {}) {
   const req = Readable.from([Buffer.from(JSON.stringify(body ?? {}), 'utf8')]);
@@ -221,6 +240,97 @@ await ok('library.add', { path: bookPath });
 await fs.writeFile(booksFile, '{ broken', 'utf8');
 assert.deepEqual((await ok('library.get')).books, []);
 assert.equal((await fs.readdir(dataDir)).filter((n) => n.startsWith('books.json.corrupt-')).length, 1, '损坏文件必须备份而非覆盖');
+
+/* --------------------------------------------------------------- AI 陪读 */
+
+/* 陪读状态默认关闭，且默认 5 分钟一档 —— 没开就不该产生任何 llm 调用 */
+llmCalls.length = 0;
+const comp0 = await ok('companion.get', { sessionId: 's1' });
+assert.equal(comp0.enabled, false, '陪读默认关闭');
+assert.equal(comp0.intervalMs, 300000, '默认 5 分钟一档');
+assert.equal(comp0.style, 'roast', '默认毒舌风格');
+assert.deepEqual(comp0.lines, []);
+assert.equal(comp0.hasModel, true, '有默认模型时必须如实报 true');
+assert.equal(llmCalls.length, 0, '拉状态不得调用模型');
+
+/* 关着的时候 tick 不该调模型，也不该产出吐槽 */
+const tickOff = await ok('companion.tick', {
+  sessionId: 's1', chapterIndex: 0, chapterTitle: '第一章', excerpt: '正文。', percent: 0,
+});
+assert.equal(tickOff.fired, false, '关闭时 tick 不得产出吐槽');
+assert.equal(tickOff.reason, 'off');
+
+/* 开陪读：先落配置 */
+await ok('companion.config', { sessionId: 's1', enabled: true });
+assert.equal((await ok('companion.get', { sessionId: 's1' })).enabled, true);
+
+/* 开启后第一次 tick 就触发（lastLineAt 初值为 0） */
+const tick1 = await ok('companion.tick', {
+  sessionId: 's1', chapterIndex: 1, chapterTitle: '第二章', excerpt: '正文二。', percent: 50,
+});
+assert.equal(tick1.fired, true, '开启后第一次 tick 应触发');
+assert.equal((await ok('companion.get', { sessionId: 's1' })).lines.length, 1);
+assert.equal((await ok('companion.get', { sessionId: 's1' })).lines[0].chapterTitle, '第二章');
+
+/* 紧接着再 tick：间隔没到，必须被门控挡下，且不得再调模型 */
+const tick2 = await ok('companion.tick', {
+  sessionId: 's1', chapterIndex: 1, chapterTitle: '第二章', excerpt: '正文二。', percent: 50,
+});
+assert.equal(tick2.fired, false, '间隔没到不得触发');
+assert.ok(tick2.reason === 'waiting', '间隔没到应报 waiting');
+assert.equal((await ok('companion.get', { sessionId: 's1' })).lines.length, 1, '被门控挡下不得新增吐槽');
+
+/* 改间隔必须生效；配置写进共享 settings.json */
+await ok('companion.config', { sessionId: 's1', intervalMs: 60000, style: 'detective' });
+const compCfg = await ok('companion.get', { sessionId: 's1' });
+assert.equal(compCfg.intervalMs, 60000);
+assert.equal(compCfg.style, 'detective');
+const settingsJson = JSON.parse(await fs.readFile(path.join(dataDir, 'settings.json'), 'utf8'));
+assert.equal(settingsJson.companion && settingsJson.companion.intervalMs, 60000, '陪读配置必须落盘');
+assert.equal(settingsJson.companion.style, 'detective');
+
+/* 非法配置必须被拒或夹紧，不得把状态改坏。
+ * 非数字（NaN）报错；负数/天文数字夹到 [30s, 24h] 区间 —— 夹紧比报错友好。 */
+assert.equal((await post('companion.config', { sessionId: 's1', intervalMs: 'abc' })).json.error.code, 'bad-request');
+assert.equal((await post('companion.config', { sessionId: 's1', style: 'mean' })).json.error.code, 'bad-request');
+assert.equal((await post('companion.config', { sessionId: 's1', enabled: 'yes' })).json.error.code, 'bad-request');
+assert.equal((await ok('companion.config', { sessionId: 's1', intervalMs: -1 })).intervalMs, 30000, '负数夹到下限');
+assert.equal((await ok('companion.config', { sessionId: 's1', intervalMs: 1e12 })).intervalMs, 86400000, '天文数字夹到上限');
+assert.equal((await ok('companion.get', { sessionId: 's1' })).style, 'detective', '非法配置不得改坏风格');
+await ok('companion.config', { sessionId: 's1', intervalMs: 60000 });
+
+/* 手动触发（现在就说）：绕过间隔门控 */
+const nudged = await ok('companion.nudge', {
+  sessionId: 's1', chapterIndex: 2, chapterTitle: '第三章', excerpt: '正文三。',
+});
+assert.equal(typeof nudged.line.text, 'string', 'nudge 必须返回一句吐槽');
+assert.ok(nudged.line.text.length > 0, '吐槽不能是空串');
+assert.equal((await ok('companion.get', { sessionId: 's1' })).lines.length, 2, 'nudge 必须落一条');
+
+/* 模型一句不吐时，nudge 必须如实报错，而不是塞一条空的进去 */
+llmCalls.length = 0;
+const emptyLlm = fakeLlm;
+emptyLlm.stream = async function* () { yield { type: 'text-delta', text: '   ' }; };
+const emptyRes = await post('companion.nudge', { sessionId: 's1', excerpt: '正文三。' });
+assert.equal(emptyRes.json.error.code, 'empty-response', '模型空回复必须报错而非落一条空吐槽');
+assert.equal((await ok('companion.get', { sessionId: 's1' })).lines.length, 2, '空回复不得新增条目');
+
+/* 清空 */
+await ok('companion.clear', { sessionId: 's1' });
+assert.equal((await ok('companion.get', { sessionId: 's1' })).lines.length, 0);
+
+/* 关掉之后 tick 又变静默 */
+await ok('companion.config', { sessionId: 's1', enabled: false });
+const tickOff2 = await ok('companion.tick', {
+  sessionId: 's1', chapterIndex: 2, chapterTitle: '第三章', excerpt: '正文三。', percent: 60,
+});
+assert.equal(tickOff2.fired, false);
+assert.equal(tickOff2.reason, 'off');
+
+/* 不同 session 的状态互相隔离 */
+const other = await ok('companion.get', { sessionId: 's2' });
+assert.equal(other.enabled, false, '另一个会话不得继承开启状态');
+assert.equal(other.intervalMs, 300000, '另一个会话不得继承自定义间隔');
 
 await fs.rm(sandbox, { recursive: true, force: true });
 console.log('hosttest: all assertions passed');

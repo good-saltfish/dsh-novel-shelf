@@ -49,20 +49,28 @@ globalThis.fetch = async (url, init) => {
   const method = String(url).split('/').pop();
   const body = init && init.body ? JSON.parse(init.body) : {};
   requests.push({ method, url: String(url), body, init });
-  const value = RESPONSES[method];
-  const text = JSON.stringify(value && value.ok === false
-    ? { ok: false, error: { code: 'e', message: value.message } }
-    : { ok: true, value: value ? value.value : {} });
+  const entry = RESPONSES[method];
+  const value = entry && entry.byIndex ? entry.byIndex(body.index || 0) : (entry ? entry.value : undefined);
+  const text = JSON.stringify(entry && entry.ok === false
+    ? { ok: false, error: { code: 'e', message: entry.message } }
+    : { ok: true, value: value || {} });
   return { status: 200, text: async () => text };
 };
 
 const RESPONSES = {
   'library.get': { value: { books: [{ id: 'b1', name: '测试书', path: 'C:/a.txt', size: 2048 }], settings: { theme: 'sepia', fontSize: 21 }, themes: ['day', 'eye', 'sepia', 'dark', 'black'] } },
   'book.open': { value: { id: 'b1', name: '测试书', path: 'C:/a.txt', encoding: 'UTF-8', chapters: [{ title: '第一章' }, { title: '第二章' }], progress: { chapterIndex: 0, scrollRatio: 0 }, settings: { fontSize: 21, lineHeight: 1.9, theme: 'sepia' } } },
-  'book.chapter': { value: { index: 0, title: '第一章', paragraphs: [{ index: 0, text: '正文', meta: false }], highlights: [] } },
+  // 真实 host 按请求的 index 返回对应章节。桩必须同样按 index 回，
+  // 否则「翻章」用例里 index 变了、章名不变，断言会测出假失败。
+  'book.chapter': { byIndex: (i) => ({ index: i, title: `第${'一二三四五六七八九十'[i] || i}章`, paragraphs: [{ index: 0, text: '正文', meta: false }], highlights: [] }) },
   'book.save': { value: { saved: true } },
   'book.search': { value: { results: [], total: 0 } },
   'settings.save': { value: {} },
+  'companion.get': { value: { enabled: false, intervalMs: 300000, style: 'roast', lines: [], pending: false, hasModel: true, error: '' } },
+  'companion.config': { value: {} },
+  'companion.nudge': { value: {} },
+  'companion.clear': { value: {} },
+  'companion.tick': { value: { fired: false, reason: 'not-due' } },
 };
 
 const loaded = [];
@@ -375,6 +383,82 @@ const range = findAll(tree, 'nr-range')[0];
 range.props.onChange({ target: { value: '26' } });
 await flush();
 assert.ok(requests.some((r) => r.method === 'settings.save' && r.body.fontSize === 26), '字号必须写回');
+
+/* --------------------------------------------------------------- AI 陪读 */
+
+/* 陪读面板默认收起：Reader 挂载时不许打 companion.* 请求。
+ * 这条断言的意义是「默认不调用模型」——用户没开就不花钱。 */
+requests.length = 0;
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await render(ReactStub.createElement(BodyComponent, {})); }
+assert.ok(
+  !requests.some((r) => String(r.method).startsWith('companion.')),
+  '陪读默认关闭：Reader 挂载时不得发起任何 companion.* 请求',
+);
+
+/* 展开陪读面板 */
+const compToggle = findAll(tree, 'nr-btn').find((b) => b.props.children === 'AI 陪读');
+assert.ok(compToggle, '阅读页必须有「AI 陪读」开关按钮');
+requests.length = 0;
+compToggle.props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await render(ReactStub.createElement(BodyComponent, {})); }
+assert.ok(requests.some((r) => r.method === 'companion.get'), '展开陪读面板必须拉取状态');
+const compBox = findAll(tree, 'nr-companion')[0];
+assert.ok(compBox, '陪读面板必须渲染');
+
+/* 间隔与风格下拉：选项数量与档位要对 */
+const selects = findAll(tree, 'nr-select');
+assert.equal(selects.length, 2, '陪读应有「间隔 + 风格」两个下拉');
+assert.equal(selects[0].props.children.length, 4, '间隔应有 4 档');
+assert.equal(selects[1].props.children.length, 4, '风格应有 4 种');
+
+/* 切风格必须写回，且不得触发任何模型调用 */
+requests.length = 0;
+selects[1].props.onChange({ target: { value: 'detective' } });
+await flush();
+assert.ok(
+  requests.some((r) => r.method === 'companion.config' && r.body.style === 'detective'),
+  '切风格必须写回 companion.config',
+);
+assert.ok(
+  !requests.some((r) => r.method === 'companion.nudge' || r.method === 'companion.tick'),
+  '改配置不得顺手调用模型',
+);
+
+/* 开陪读：只发一次 config，host 才会在下一个轮询周期调模型 */
+requests.length = 0;
+const onBtn = findAll(tree, 'nr-btn').find((b) => b.props.children === '已关闭');
+assert.ok(onBtn, '关闭态要显示「已关闭」按钮');
+onBtn.props.onClick();
+await flush();
+assert.ok(
+  requests.some((r) => r.method === 'companion.config' && r.body.enabled === true),
+  '点开启必须写回 enabled=true',
+);
+assert.ok(
+  !requests.some((r) => r.method === 'companion.nudge'),
+  '开启本身不得调用模型（要等间隔到点）',
+);
+
+/* 「现在就说」必须把章号/章名/正文摘要一起报上去 */
+requests.length = 0;
+const nudgeBtn = findAll(tree, 'nr-btn').find((b) => b.props.children === '现在就说');
+assert.ok(nudgeBtn, '必须有「现在就说」按钮');
+nudgeBtn.props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await render(ReactStub.createElement(BodyComponent, {})); }
+const nudge = requests.find((r) => r.method === 'companion.nudge');
+assert.ok(nudge, '点「现在就说」必须调 companion.nudge');
+// 前面「翻章」用例已经把 index 推到 1，所以这里应报 1 / 第二章
+assert.equal(nudge.body.chapterIndex, 1, 'nudge 必须报章号');
+assert.equal(nudge.body.chapterTitle, '第二章', 'nudge 必须报章名');
+assert.ok(typeof nudge.body.excerpt === 'string' && nudge.body.excerpt.length > 0, 'nudge 必须带正文摘要');
+
+/* 陪读失败只显示错误，不许把阅读页带崩 */
+requests.length = 0;
+RESPONSES['companion.get'] = { ok: false, message: 'boom' };
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await render(ReactStub.createElement(BodyComponent, {})); }
+assert.ok(findAll(tree, 'nr-error').length >= 1, '陪读出错要在面板内显示错误');
+assert.ok(findAll(tree, 'nr-reader').length === 1, '陪读出错不得影响正文渲染');
+RESPONSES['companion.get'] = { value: { enabled: false, intervalMs: 300000, style: 'roast', lines: [], pending: false, hasModel: true, error: '' } };
 
 /* --------------------------------------------------------------- 注销 */
 
