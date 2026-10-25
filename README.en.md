@@ -8,6 +8,8 @@
 
 ![The whole DSH window with the "小说书架 / Novel Shelf" tab open in the right sidebar](docs/screenshot-full.png)
 
+![The AI companion: character in the corner with a speech bubble](docs/screenshot-ai-companion.png)
+
 ## What's new in v0.2.0
 
 This release turns the AI reading companion into something you actually use, and fixes a few things that got in the way:

@@ -8,6 +8,8 @@
 
 ![DSH 整体界面，右侧栏打开「小说书架」](docs/screenshot-full.png)
 
+![AI 陪读：右下角陪读人物与吐槽气泡](docs/screenshot-ai-companion.png)
+
 ## v0.2.0 新增 / What's new in v0.2.0
 
 这一版把「AI 陪读」做成了真正能用的东西，也修掉了几个用着难受的毛病：
