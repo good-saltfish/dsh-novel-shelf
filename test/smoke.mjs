@@ -71,6 +71,18 @@ const RESPONSES = {
   'companion.nudge': { value: {} },
   'companion.clear': { value: {} },
   'companion.tick': { value: { fired: false, reason: 'not-due' } },
+  'model.options': {
+    value: {
+      providers: [
+        { id: 'deepseek-official', name: 'DeepSeek', models: [{ id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash' }] },
+        { id: 'workbuddy-global', name: 'WorkBuddy', models: [{ id: 'hy3', name: 'HY3' }] },
+      ],
+      current: { provider: '', model: '' },
+    },
+  },
+  'model.save': { value: { saved: true } },
+  'model.reset': { value: { saved: true } },
+  'model.test': { value: { ok: true, message: '通了' } },
 };
 
 const loaded = [];
@@ -99,6 +111,7 @@ function beginComponent(type) {
   if (!states.has(type)) states.set(type, []);
   current = { slots: states.get(type), effects: [], type };
   cursor = 0;
+  seenThisPass.add(type);
 }
 
 const ReactStub = {
@@ -120,9 +133,24 @@ const ReactStub = {
     if (!current.slots[i]) current.slots[i] = { v: { current: initial } };
     return current.slots[i].v;
   },
-  useMemo(fn) { return fn(); },
-  useCallback(fn) { return fn; },
-  useEffect(fn, deps) { current.effects.push({ fn, deps, i: cursor++ }); },
+  useMemo(fn, deps) {
+    // 真 React 的 useMemo 在 deps 不变时返回同一个引用；桩若每次都新算，
+    // 依赖它的 useEffect 就会误判成「变了」，于是每帧重挂载陪读面板。
+    const i = cursor++;
+    const cell = current.slots[i] || (current.slots[i] = { v: undefined, deps: undefined });
+    if (cell.v === undefined || depsChanged(cell.deps, deps)) cell.v = fn();
+    cell.deps = deps;
+    return cell.v;
+  },
+  useCallback(fn, deps) {
+    // 同理：useCallback 必须保持引用稳定。
+    const i = cursor++;
+    const cell = current.slots[i] || (current.slots[i] = { v: undefined, deps: undefined });
+    if (cell.v === undefined || depsChanged(cell.deps, deps)) cell.v = fn;
+    cell.deps = deps;
+    return cell.v;
+  },
+  useEffect(fn, deps) { current.effects.push({ fn, deps, i: cursor++, cleanup: null }); },
 };
 
 function depsChanged(a, b) {
@@ -153,9 +181,17 @@ async function render(element, depth = 0) {
       // React 按「组件 + hook 序号」比对 deps，不是按函数身份
       // （每次渲染都是新闭包，用 fn 当 key 会让 deps 永远算成「变了」）
       const key = `${mine.type.name || 'anon'}#${e.i}`;
-      if (e.deps === undefined || e.deps === null) e.fn();
-      else if (depsChanged(effectDeps.get(key), e.deps)) e.fn();
+      const prevCleanup = effectCleanups.get(key);
+      if (e.deps === undefined || e.deps === null) {
+        if (prevCleanup) { try { prevCleanup(); } catch { /* ignore */ } }
+        e.cleanup = e.fn();
+      } else if (depsChanged(effectDeps.get(key), e.deps)) {
+        // 真 React：依赖变了先跑上一次的清理，再跑新的 effect
+        if (prevCleanup) { try { prevCleanup(); } catch { /* ignore */ } }
+        e.cleanup = e.fn();
+      }
       effectDeps.set(key, e.deps);
+      if (typeof e.cleanup === 'function') effectCleanups.set(key, e.cleanup);
     }
     return rendered;
   }
@@ -169,6 +205,42 @@ async function render(element, depth = 0) {
 }
 
 const effectDeps = new Map();
+const effectCleanups = new Map();
+/* 本轮渲染出现过的组件类型；和上一轮比，差集就是被卸载的组件。 */
+let seenThisPass = new Set();
+let seenLastPass = new Set();
+
+/**
+ * 一轮完整渲染结束：结算哪些组件被卸载了。
+ * 真 React 里卸载 = 组件实例销毁、state 丢失、effect 清理函数被调用。
+ * 桩按组件类型复用 state，就分不清「重渲染」和「重新挂载」——
+ * 结果是关掉再打开陪读面板时 effect 不再执行，看起来像 host 收到了请求，
+ * 其实一次都没发。这里补上卸载语义，让桩跟真 React 对齐。
+ */
+function finishPass() {
+  for (const type of seenLastPass) {
+    if (seenThisPass.has(type)) continue;
+    const prefix = `${type.name || 'anon'}#`;
+    for (const [key, fn] of Array.from(effectCleanups.entries())) {
+      if (!key.startsWith(prefix)) continue;
+      try { fn(); } catch { /* 清理失败不该让测试炸 */ }
+      effectCleanups.delete(key);
+    }
+    states.delete(type);
+    for (const key of Array.from(effectDeps.keys())) {
+      if (key.startsWith(prefix)) effectDeps.delete(key);
+    }
+  }
+  seenLastPass = new Set(seenThisPass);
+  seenThisPass = new Set();
+}
+
+/** 顶层渲染一轮，并在结束时结算卸载。 */
+async function renderPass(element) {
+  const tree = await render(element, 0);
+  finishPass();
+  return tree;
+}
 
 /** 在渲染树里按 className 找元素节点。 */
 function findAll(tree, className, out = []) {
@@ -324,9 +396,9 @@ const BodyComponent = registered.find((r) => r.name === 'sidebar.right.pane.tab'
 
 /* --------------------------------------------------------------- 渲染 + 主题 */
 
-let tree = await render(ReactStub.createElement(BodyComponent, {}));
+let tree = await renderPass(ReactStub.createElement(BodyComponent, {}));
 await flush();
-tree = await render(ReactStub.createElement(BodyComponent, {}));
+tree = await renderPass(ReactStub.createElement(BodyComponent, {}));
 await flush();
 
 assert.ok(requests.some((r) => r.method === 'library.get'), '挂载必须拉书架');
@@ -346,7 +418,7 @@ requests.length = 0;
 swatches = findAll(tree, 'nr-swatch');
 assert.equal(swatches.length, 5);
 swatches[4].props.onClick();
-tree = await render(ReactStub.createElement(BodyComponent, {}));
+tree = await renderPass(ReactStub.createElement(BodyComponent, {}));
 pane = findAll(tree, 'nr-pane')[0];
 assert.equal(pane.props['data-theme'], 'black', '点第五个色板应切到 black');
 await flush();
@@ -360,7 +432,7 @@ assert.equal(saved[0].body.theme, 'black');
 /* 打开一本书：主题在阅读页不得丢 */
 requests.length = 0;
 findAll(tree, 'nr-item-main')[0].props.onClick();
-for (let i = 0; i < 4; i += 1) { await flush(); tree = await render(ReactStub.createElement(BodyComponent, {})); }
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
 assert.ok(requests.some((r) => r.method === 'book.open'), '点书必须调 book.open');
 pane = findAll(tree, 'nr-pane')[0];
 assert.equal(pane.props['data-theme'], 'black', '进入阅读页主题不得回退');
@@ -374,7 +446,7 @@ assert.ok(swatches[0].props['aria-pressed'] === 'false');
 requests.length = 0;
 const nextBtn = findAll(tree, 'nr-btn').find((b) => b.props.children === '下一章');
 nextBtn.props.onClick();
-for (let i = 0; i < 4; i += 1) { await flush(); tree = await render(ReactStub.createElement(BodyComponent, {})); }
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
 assert.ok(requests.some((r) => r.method === 'book.chapter'), '翻章必须请求正文');
 
 /* 字号改动必须写回 */
@@ -389,7 +461,7 @@ assert.ok(requests.some((r) => r.method === 'settings.save' && r.body.fontSize =
 /* 陪读面板默认收起：Reader 挂载时不许打 companion.* 请求。
  * 这条断言的意义是「默认不调用模型」——用户没开就不花钱。 */
 requests.length = 0;
-for (let i = 0; i < 4; i += 1) { await flush(); tree = await render(ReactStub.createElement(BodyComponent, {})); }
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
 assert.ok(
   !requests.some((r) => String(r.method).startsWith('companion.')),
   '陪读默认关闭：Reader 挂载时不得发起任何 companion.* 请求',
@@ -400,7 +472,7 @@ const compToggle = findAll(tree, 'nr-btn').find((b) => b.props.children === 'AI 
 assert.ok(compToggle, '阅读页必须有「AI 陪读」开关按钮');
 requests.length = 0;
 compToggle.props.onClick();
-for (let i = 0; i < 4; i += 1) { await flush(); tree = await render(ReactStub.createElement(BodyComponent, {})); }
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
 assert.ok(requests.some((r) => r.method === 'companion.get'), '展开陪读面板必须拉取状态');
 const compBox = findAll(tree, 'nr-companion')[0];
 assert.ok(compBox, '陪读面板必须渲染');
@@ -444,7 +516,7 @@ requests.length = 0;
 const nudgeBtn = findAll(tree, 'nr-btn').find((b) => b.props.children === '现在就说');
 assert.ok(nudgeBtn, '必须有「现在就说」按钮');
 nudgeBtn.props.onClick();
-for (let i = 0; i < 4; i += 1) { await flush(); tree = await render(ReactStub.createElement(BodyComponent, {})); }
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
 const nudge = requests.find((r) => r.method === 'companion.nudge');
 assert.ok(nudge, '点「现在就说」必须调 companion.nudge');
 // 前面「翻章」用例已经把 index 推到 1，所以这里应报 1 / 第二章
@@ -452,13 +524,115 @@ assert.equal(nudge.body.chapterIndex, 1, 'nudge 必须报章号');
 assert.equal(nudge.body.chapterTitle, '第二章', 'nudge 必须报章名');
 assert.ok(typeof nudge.body.excerpt === 'string' && nudge.body.excerpt.length > 0, 'nudge 必须带正文摘要');
 
-/* 陪读失败只显示错误，不许把阅读页带崩 */
+/* 陪读失败只显示错误，不许把阅读页带崩。
+   注意：useCallback/useMemo 的引用现在稳定了（和真 React 一样），
+   挂载 effect 不会每帧重跑 —— 所以要让「下一次拉状态」失败，
+   必须把面板卸载再挂载（关掉 → 重新打开）。 */
 requests.length = 0;
 RESPONSES['companion.get'] = { ok: false, message: 'boom' };
-for (let i = 0; i < 4; i += 1) { await flush(); tree = await render(ReactStub.createElement(BodyComponent, {})); }
+findAll(tree, 'nr-btn').find((b) => b.props.children === 'AI 陪读').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.equal(findAll(tree, 'nr-companion').length, 0, '关掉后陪读面板应卸载');
+findAll(tree, 'nr-btn').find((b) => b.props.children === 'AI 陪读').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.ok(requests.some((r) => r.method === 'companion.get'), '重新打开必须再拉一次状态');
 assert.ok(findAll(tree, 'nr-error').length >= 1, '陪读出错要在面板内显示错误');
 assert.ok(findAll(tree, 'nr-reader').length === 1, '陪读出错不得影响正文渲染');
 RESPONSES['companion.get'] = { value: { enabled: false, intervalMs: 300000, style: 'roast', lines: [], pending: false, hasModel: true, error: '' } };
+
+/* --------------------------------------------------------------- 悬浮人物 + 气泡 */
+
+/* 陪读关着：右下角什么都不该出现（不能凭空多个图占地方） */
+requests.length = 0;
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.equal(findAll(tree, 'nr-avatar').length, 0, '陪读未开启时不得出现悬浮人物');
+
+/* 陪读开着且有吐槽：右下角出现人物 + 气泡 */
+RESPONSES['companion.get'] = {
+  value: {
+    enabled: true, intervalMs: 300000, style: 'roast', pending: false, hasModel: true, error: '',
+    lines: [{ at: '2026-10-25T10:00:00Z', chapterIndex: 1, chapterTitle: '第二章', text: '这段有点水' }],
+  },
+};
+/* 面板当前是开着的（上一段重新打开过），先关掉再打开，
+   让 Companion 重新挂载、去 host 拉一次新状态。 */
+findAll(tree, 'nr-btn').find((b) => b.props.children === 'AI 陪读').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+findAll(tree, 'nr-btn').find((b) => b.props.children === 'AI 陪读').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.ok(requests.some((r) => r.method === 'companion.get'), '重新打开必须再拉一次陪读状态');
+
+/* 人物必须是 bundle 内的图（别人装上也有），不是本机绝对路径 */
+const avatarNodes = findAll(tree, 'nr-avatar-img');
+assert.equal(avatarNodes.length, 1, '悬浮人物必须渲染一个 img');
+const img = avatarNodes[0];
+assert.ok(
+  String(img.props.src).includes('novel-shelf/assets/reader-avatar.png'),
+  '人物图必须走插件自带静态路由，收到 ' + img.props.src,
+);
+assert.equal(img.props.alt, '陪读形象', '图片要有中文 alt');
+
+/* 气泡默认展开，显示最新一条 + 章节定位 */
+const bubble = findAll(tree, 'nr-avatar-bubble')[0];
+assert.ok(bubble, '开启陪读后应显示吐槽气泡');
+const bubbleTree = bubble ? (await render(bubble)) : null;
+assert.ok(
+  bubbleTree && bubbleTree.text.includes('这段有点水'),
+  '气泡要显示最新一条吐槽，实际文本：' + JSON.stringify(bubbleTree && bubbleTree.text),
+);
+assert.ok(bubbleTree && bubbleTree.text.includes('第二章'), '气泡要带章节定位');
+
+/* 点气泡收起：人物留着，气泡消失，且不该打任何请求 */
+requests.length = 0;
+bubble.props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.equal(findAll(tree, 'nr-avatar-bubble').length, 0, '点气泡应收起');
+assert.equal(findAll(tree, 'nr-avatar').length, 1, '收起气泡后人物应仍在');
+assert.ok(
+  !requests.some((r) => String(r.method).startsWith('companion.')),
+  '收起气泡只动本地状态，不该打请求',
+);
+
+/* 一条吐槽都没有时：不画气泡，连人物也不该出现（避免空占位）
+   状态是随陪读面板挂载时从 host 拉来的，所以要先关再开，让它重新拉一次。 */
+RESPONSES['companion.get'] = {
+  value: { enabled: true, intervalMs: 300000, style: 'roast', lines: [], pending: false, hasModel: true, error: '' },
+};
+findAll(tree, 'nr-btn').find((b) => b.props.children === 'AI 陪读').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+findAll(tree, 'nr-btn').find((b) => b.props.children === 'AI 陪读').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.equal(findAll(tree, 'nr-avatar-bubble').length, 0, '没有吐槽时不得显示气泡');
+assert.equal(findAll(tree, 'nr-avatar').length, 0, '没有吐槽时连人物也不占地方');
+
+/* 恢复默认桩，避免影响后面的用例 */
+RESPONSES['companion.get'] = { value: { enabled: false, intervalMs: 300000, style: 'roast', lines: [], pending: false, hasModel: true, error: '' } };
+
+/* --------------------------------------------------------------- 模型选择 */
+
+/* 模型按钮在阅读页 */
+const modelBtn = findAll(tree, 'nr-btn').find((b) => b.props.children === '模型');
+assert.ok(modelBtn, '阅读页必须有「模型」按钮');
+
+/* 打开模型面板：列出 provider */
+requests.length = 0;
+modelBtn.props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.ok(requests.some((r) => r.method === 'model.options'), '打开模型面板必须拉 provider 列表');
+const providerSelect = findAll(tree, 'nr-select').find((s) => s.props.className === 'nr-select');
+assert.ok(providerSelect, '模型面板必须有 provider 下拉');
+const providerIds = providerSelect.props.children.map((o) => o.props.value);
+assert.ok(providerIds.includes('deepseek-official'), 'provider 下拉必须列出 DSH 已注册的 provider，实际 ' + JSON.stringify(providerIds));
+
+/* 选一个 provider 后保存：必须发 model.save */
+requests.length = 0;
+const modelSaves = findAll(tree, 'nr-btn').filter((b) => String(b.props.children).includes('保存'));
+assert.ok(modelSaves.length >= 1, '模型面板必须有保存按钮');
+modelSaves[0].props.onClick();
+await flush();
+const savedModel = requests.find((r) => r.method === 'model.save');
+assert.ok(savedModel, '保存模型必须调 model.save');
+assert.ok(typeof savedModel.body.provider === 'string', 'model.save 必须带 provider');
 
 /* --------------------------------------------------------------- 注销 */
 

@@ -38,13 +38,31 @@ process.env.NOVEL_SHELF_BOOKS_DIR = bundleBooks;
 const mod = await import('../lib/host.js');
 
 /* 陪读桩：llm.stream 按增量吐字，agentDefaultModel 报一个默认选择。
- * 这两个服务在真实宿主里由 DSH 提供，桩按 apply 里 inject 声明提供同名属性。 */
+ * 这两个服务在真实宿主里由 DSH 提供，桩按 apply 里 inject 声明提供同名属性。
+ * resolveModelInfo 模仿真实宿主：公示 effort 列表，宿主代码必须自己压低到
+ * 最低档，否则推理会吃光 220 的 maxTokens，正文一个字不吐。 */
 const llmCalls = [];
 const fakeLlm = {
   async *stream(spec) {
     llmCalls.push(spec);
     yield { type: 'text-delta', text: '这一段有点东西，' };
     yield { type: 'text-delta', text: '但不多。' };
+  },
+  async resolveModelInfo(provider, model) {
+    /* 真实宿主形状：efforts 是 { id, name } 对象数组，不是裸字符串。
+     * 见 dsh-llm normalizeModelInfo（lib/index.js:2075-2083）。宿主校验拿
+     * effort.id 比对，传整个对象会得到 "[object Object]" 报错。 */
+    return {
+      provider, model,
+      reasoning: {
+        defaultEffort: 'high',
+        efforts: [
+          { id: 'low', name: 'Low' },
+          { id: 'medium', name: 'Medium' },
+          { id: 'high', name: 'High' },
+        ],
+      },
+    };
   },
 };
 const fakeDefaultModel = { currentSelection: () => ({ provider: 'deepseek', model: 'deepseek-chat' }) };
@@ -260,27 +278,31 @@ const tickOff = await ok('companion.tick', {
 assert.equal(tickOff.fired, false, '关闭时 tick 不得产出吐槽');
 assert.equal(tickOff.reason, 'off');
 
-/* 开陪读：先落配置 */
+/* 开陪读：先落配置（默认关闭，必须显式开） */
 await ok('companion.config', { sessionId: 's1', enabled: true });
 assert.equal((await ok('companion.get', { sessionId: 's1' })).enabled, true);
 
 /* 开启后第一次 tick 就触发（lastLineAt 初值为 0） */
+llmCalls.length = 0;
 const tick1 = await ok('companion.tick', {
   sessionId: 's1', chapterIndex: 1, chapterTitle: '第二章', excerpt: '正文二。', percent: 50,
 });
 assert.equal(tick1.fired, true, '开启后第一次 tick 应触发');
 assert.equal((await ok('companion.get', { sessionId: 's1' })).lines.length, 1);
+
+/* 真实宿主踩过的坑：默认 effort 是 high，几百字吐槽会被推理吃光预算返回空。
+ * 所以必须主动压到模型公示的最低档。 */
+assert.equal(llmCalls.length, 1, '一次触发只调一次模型');
+assert.equal(llmCalls[0].reasoningEffort, 'low', '必须把推理档压到模型公示的最低档');
+assert.ok(Array.isArray(llmCalls[0].messages), 'messages 必须是数组');
+const sent = llmCalls[0].messages[0] || {};
+assert.equal(sent.role, 'user', '用户消息必须带 user 角色');
+assert.ok(Array.isArray(sent.content) && sent.content[0] && sent.content[0].type === 'text',
+  'content 必须是 block 数组，裸字符串宿主可能判成空消息');
+assert.equal(typeof llmCalls[0].system, 'string', 'system prompt 必须下发');
 assert.equal((await ok('companion.get', { sessionId: 's1' })).lines[0].chapterTitle, '第二章');
 
-/* 紧接着再 tick：间隔没到，必须被门控挡下，且不得再调模型 */
-const tick2 = await ok('companion.tick', {
-  sessionId: 's1', chapterIndex: 1, chapterTitle: '第二章', excerpt: '正文二。', percent: 50,
-});
-assert.equal(tick2.fired, false, '间隔没到不得触发');
-assert.ok(tick2.reason === 'waiting', '间隔没到应报 waiting');
-assert.equal((await ok('companion.get', { sessionId: 's1' })).lines.length, 1, '被门控挡下不得新增吐槽');
-
-/* 改间隔必须生效；配置写进共享 settings.json */
+/* 配置写进共享 settings.json，重启后仍在 */
 await ok('companion.config', { sessionId: 's1', intervalMs: 60000, style: 'detective' });
 const compCfg = await ok('companion.get', { sessionId: 's1' });
 assert.equal(compCfg.intervalMs, 60000);
@@ -297,7 +319,17 @@ assert.equal((await post('companion.config', { sessionId: 's1', enabled: 'yes' }
 assert.equal((await ok('companion.config', { sessionId: 's1', intervalMs: -1 })).intervalMs, 30000, '负数夹到下限');
 assert.equal((await ok('companion.config', { sessionId: 's1', intervalMs: 1e12 })).intervalMs, 86400000, '天文数字夹到上限');
 assert.equal((await ok('companion.get', { sessionId: 's1' })).style, 'detective', '非法配置不得改坏风格');
-await ok('companion.config', { sessionId: 's1', intervalMs: 60000 });
+
+/* 间隔门控：改回默认 5 分钟后，同样的位置再 tick 必须被挡下且不再调模型 */
+llmCalls.length = 0;
+const tick2 = await ok('companion.tick', {
+  sessionId: 's1', chapterIndex: 2, chapterTitle: '第三章', excerpt: '正文三。', percent: 50,
+});
+assert.equal(tick2.fired, false, '间隔没到不得触发');
+assert.ok(tick2.reason === 'waiting', '间隔没到应报 waiting');
+assert.equal(llmCalls.length, 0, '被门控挡下不得调用模型');
+assert.equal((await ok('companion.get', { sessionId: 's1' })).lines.length, 1, '被门控挡下不得新增吐槽');
+await ok('companion.config', { sessionId: 's1', intervalMs: 300000 });
 
 /* 手动触发（现在就说）：绕过间隔门控 */
 const nudged = await ok('companion.nudge', {
@@ -314,6 +346,23 @@ emptyLlm.stream = async function* () { yield { type: 'text-delta', text: '   ' }
 const emptyRes = await post('companion.nudge', { sessionId: 's1', excerpt: '正文三。' });
 assert.equal(emptyRes.json.error.code, 'empty-response', '模型空回复必须报错而非落一条空吐槽');
 assert.equal((await ok('companion.get', { sessionId: 's1' })).lines.length, 2, '空回复不得新增条目');
+emptyLlm.stream = async function* (spec) {
+  llmCalls.push(spec);
+  yield { type: 'text-delta', text: '这一段有点东西，' };
+  yield { type: 'text-delta', text: '但不多。' };
+};
+
+/* 真实宿主踩过的坑：workbuddy/hy3 这类模型压根不公示 reasoning 元数据，
+ * 此时宿主 must NOT 自作主张塞任何 effort —— 传了就会被 UNSUPPORTED_REASONING_EFFORT
+ * 打回来，一个字正文都不吐（实测报错 `does not support reasoning effort "[object Object]"`）。 */
+llmCalls.length = 0;
+const noReasoningLlm = fakeLlm;
+const savedResolve = noReasoningLlm.resolveModelInfo;
+noReasoningLlm.resolveModelInfo = async () => ({ provider: 'deepseek', model: 'no-reasoning' });
+const noEffort = await post('companion.nudge', { sessionId: 's1', excerpt: '正文三。' });
+assert.equal(noEffort.json.ok, true, '不公示 reasoning 的模型也必须能出吐槽');
+assert.ok(!('reasoningEffort' in llmCalls.at(-1)), '模型不公示 reasoning 时不得携带 reasoningEffort 字段');
+noReasoningLlm.resolveModelInfo = savedResolve;
 
 /* 清空 */
 await ok('companion.clear', { sessionId: 's1' });
@@ -334,3 +383,215 @@ assert.equal(other.intervalMs, 300000, '另一个会话不得继承自定义间�
 
 await fs.rm(sandbox, { recursive: true, force: true });
 console.log('hosttest: all assertions passed');
+
+/* ------------------------------------------------------------------ */
+/* 模型选择                                                           */
+/* ------------------------------------------------------------------ */
+
+/* 桩上补 llm.listProviders / listModels：真实宿主有这两个方法，
+ * 少了就只显示自定义端点那一支（面板不能让读者卡死）。 */
+fakeLlm.listProviders = async () => ([
+  { id: 'deepseek', name: 'DeepSeek' },
+  { id: 'workbuddy', name: 'WorkBuddy' },
+  { id: '', name: '无名 provider' },
+]);
+fakeLlm.listModels = async (id) => (id === 'deepseek'
+  ? [{ id: 'deepseek-chat', name: 'Chat' }, { id: 'deepseek-reasoner', name: 'Reasoner' }, { id: null }]
+  : id === 'deepseek-official'
+    ? []
+    : [{ id: 'hy3', name: 'HY3' }]);
+
+/* 声明式 provider 目录也要合进来。
+   真实宿主里 DeepSeek 的两个路由（账号 / API Key）先 registerConfigurableProviders
+   声明自己，等用户登录或填了 key 才有 adapter、才有模型列表。
+   只读 listProviders 的话，读者在面板里根本看不到「DeepSeek」这个选项。 */
+fakeLlm.listConfigurableProviders = async () => ([
+  { provider: 'deepseek-account', displayName: 'DeepSeek Account', settingsNs: 'llm-deepseek-account', settingsPath: [] },
+  { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek-api-key', settingsPath: [], error: 'api key missing' },
+  { provider: 'deepseek', displayName: '重复项' },
+]);
+const merged = await ok('model.options');
+assert.ok(merged.providers.some((p) => p.id === 'deepseek-account'),
+  '声明式 provider 必须在列表里（否则读者看不到 DeepSeek 账号登录这条路）');
+assert.ok(merged.providers.some((p) => p.id === 'deepseek-official'),
+  'API Key 版 DeepSeek 也必须在列表里');
+assert.equal(merged.providers.filter((p) => p.id === 'deepseek').length, 1, '同一个 provider 不得出现两次');
+const official = merged.providers.find((p) => p.id === 'deepseek-official');
+assert.equal(official.error, 'api key missing', 'provider 自带的错误信息要带给界面');
+assert.equal(official.models.length, 0, '没有 key 时列不出模型是正常的');
+delete fakeLlm.listConfigurableProviders;
+
+const mopts = await ok('model.options');
+assert.deepEqual(mopts.providers.map((p) => p.id), ['deepseek', 'workbuddy'], 'provider 列表必须过滤掉没有 id 的');
+assert.deepEqual(mopts.providers[0].models.map((m) => m.id), ['deepseek-chat', 'deepseek-reasoner'], '模型列表必须过滤掉没有 id 的');
+assert.equal(mopts.providers[1].models[0].id, 'hy3', '第二个 provider 的模型必须列出来');
+assert.equal(mopts.defaultModel.provider, 'deepseek', '默认模型来自 agentDefaultModel');
+assert.deepEqual(mopts.saved, { provider: '', model: '', baseURL: '', apiKey: '' }, '没存过时必须是空选择');
+
+/* 存一个 DSH 站内模型 */
+assert.deepEqual((await ok('model.save', { provider: 'workbuddy', model: 'hy3' })).saved,
+  { provider: 'workbuddy', model: 'hy3', baseURL: '', apiKey: '' });
+assert.equal((await ok('model.options')).saved.model, 'hy3', 'model.save 必须落盘');
+
+/* 存过的选择必须真的用上：吐槽请求的 provider/model 跟着变 */
+llmCalls.length = 0;
+await ok('companion.config', { sessionId: 's3', enabled: true });
+await ok('companion.nudge', { sessionId: 's3', excerpt: '正文一。' });
+assert.equal(llmCalls.at(-1).provider, 'workbuddy', '存了 provider 就必须传给 llm.stream');
+assert.equal(llmCalls.at(-1).model, 'hy3', '存了 model 就必须传给 llm.stream');
+
+/* 空字段 = 回到跟随 DSH 默认 */
+await ok('model.save', { provider: '', model: '' });
+assert.equal((await ok('model.options')).saved.model, '', '空字段表示跟随默认');
+llmCalls.length = 0;
+await ok('companion.nudge', { sessionId: 's3', excerpt: '正文一。' });
+assert.equal(llmCalls.at(-1).provider, 'deepseek', '没存选择时必须用 DSH 默认模型');
+assert.equal(llmCalls.at(-1).model, 'deepseek-chat');
+
+/* 自定义端点：三项齐全才收，缺一个都要说清缺谁 */
+assert.equal((await post('model.save', { baseURL: 'https://api.example.com/v1' })).json.error.code, 'bad-request');
+assert.equal((await post('model.save', { apiKey: 'sk-x' })).json.error.code, 'bad-request');
+assert.equal((await post('model.save', {
+  baseURL: 'https://api.example.com/v1', apiKey: 'sk-x',
+})).json.error.code, 'bad-request', '只填 baseURL + key 不收：会发到没有模型名的地址上');
+assert.match((await post('model.save', { baseURL: 'https://a.com', apiKey: 'k' })).json.error.message, /模型名/,
+  '报错要说清缺的是模型名');
+assert.match((await post('model.save', { baseURL: 'notaurl', apiKey: 'k', model: 'm' })).json.error.message,
+  /http/, 'baseURL 必须校验协议');
+assert.equal((await post('model.save', { apiKey: 'sk-x', model: 'm', baseURL: 'ftp://a.com' })).json.error.code,
+  'bad-request', 'ftp 这类协议必须拒');
+assert.equal((await post('model.save', { baseURL: 'https://api.example.com', apiKey: 'k', model: 'm' })).json.ok, true,
+  'http(s) 根地址（不带 /v1）必须收');
+
+/* 自定义端点存盘后，吐槽改走 fetch，不再动宿主 llm */
+const realFetch = globalThis.fetch;
+const seenBodies = [];
+const seenInits = [];
+globalThis.fetch = async (url, init) => {
+  seenBodies.push({ url: String(url), body: JSON.parse(String(init.body)) });
+  seenInits.push(init);
+  /* 真实端点是 SSE：data: 行 + 空行分段，末行 [DONE]。
+   * 桩必须按这个形状返回，否则等于没测到 SSE 解析路径。 */
+  const sse = [
+    'data: ' + JSON.stringify({ choices: [{ delta: { content: '自定义端点' } }] }), '',
+    'data: ' + JSON.stringify({ choices: [{ delta: { content: '说话了。' } }] }), '',
+    'data: [DONE]', '',
+    '',
+  ].join('\n');
+  const encoder = new TextEncoder();
+  return {
+    ok: true,
+    body: {
+      getReader() {
+        let i = 0;
+        const chunks = [sse];
+        return {
+          async read() { return i < chunks.length ? { done: false, value: encoder.encode(chunks[i++]) } : { done: true, value: undefined }; },
+          cancel() {},
+        };
+      },
+    },
+  };
+};
+try {
+  await ok('model.save', { baseURL: 'https://api.example.com/v1', apiKey: 'sk-secret', model: 'my-model' });
+  llmCalls.length = 0;
+  const custom = await ok('companion.nudge', { sessionId: 's3', excerpt: '正文一。' });
+  assert.equal(custom.line.text, '自定义端点说话了。', '自定义端点必须真的被调用');
+  assert.equal(llmCalls.length, 0, '自定义端点不得再走宿主 llm');
+  assert.equal(seenBodies.at(-1).url, 'https://api.example.com/v1/chat/completions');
+  assert.equal(seenBodies.at(-1).body.model, 'my-model');
+  assert.equal(seenBodies.at(-1).body.authorization, undefined, 'key 走 Authorization 头，不塞 body');
+  assert.ok(seenBodies.at(-1).body.messages.length >= 2, '请求必须带 system + user 两条');
+  assert.equal(seenBodies.at(-1).body.stream, true, '自定义端点必须走 SSE 流式');
+  const authHeader = seenInits.at(-1).headers;
+  assert.ok(authHeader && String(authHeader.authorization).startsWith('Bearer '), 'key 必须走 Authorization: Bearer');
+
+  const tested = await ok('model.test');
+  assert.equal(tested.source, 'custom', 'model.test 必须报告走的是自定义端点');
+  assert.equal(tested.sample, '自定义端点说话了。');
+} finally {
+  globalThis.fetch = realFetch;
+}
+
+/* SSE 拆包要按空行分段：把两段塞进同一个 chunk，也必须是两条完整文本 */
+globalThis.fetch = async (url, init) => {
+  seenBodies.push({ url: String(url), body: JSON.parse(String(init.body)) });
+  const sse = 'data: ' + JSON.stringify({ choices: [{ delta: { content: '甲' } }] }) + '\n\n'
+    + 'data: ' + JSON.stringify({ choices: [{ delta: { content: '乙' } }] }) + '\n\n'
+    + 'data: [DONE]\n\n';
+  const encoder = new TextEncoder();
+  return {
+    ok: true,
+    body: {
+      getReader() {
+        let sent = false;
+        return {
+          async read() {
+            if (sent) return { done: true, value: undefined };
+            sent = true;
+            return { done: false, value: encoder.encode(sse) };
+          },
+          cancel() {},
+        };
+      },
+    },
+  };
+};
+try {
+  const oneShot = await ok('companion.nudge', { sessionId: 's3', excerpt: '正文二。' });
+  assert.equal(oneShot.line.text, '甲乙', '一个 chunk 里的多段 SSE 必须全部拆出来');
+} finally {
+  globalThis.fetch = realFetch;
+}
+
+/* 自定义端点 HTTP 报错时，nudge 必须把状态码说出来 */
+const linesBeforeDenied = (await ok('companion.get', { sessionId: 's3' })).lines.length;
+globalThis.fetch = async () => ({ ok: false, status: 401, statusText: 'Unauthorized', async text() { return 'bad key'; } });
+try {
+  const denied = await post('companion.nudge', { sessionId: 's3', excerpt: '正文三。' });
+  assert.equal(denied.json.ok, false, '自定义端点 401 必须报错');
+  assert.match(denied.json.error.message, /401/, '报错要带 HTTP 状态码');
+  assert.equal((await ok('companion.get', { sessionId: 's3' })).lines.length, linesBeforeDenied,
+    '失败不得落一条空吐槽');
+} finally {
+  globalThis.fetch = realFetch;
+}
+
+/* reset：清掉插件存的模型偏好（连同 key） */
+await ok('companion.config', { sessionId: 's3', intervalMs: 60000 });
+await ok('model.reset');
+assert.equal((await ok('model.options')).saved.apiKey, '', 'reset 必须把 key 一起清掉');
+const settingsAfterReset = JSON.parse(await fs.readFile(path.join(dataDir, 'settings.json'), 'utf8'));
+assert.equal(settingsAfterReset.model.apiKey, '', 'key 必须真的从磁盘上消失');
+assert.equal(settingsAfterReset.companion.intervalMs, 60000, 'model.reset 不得抹掉其它设置');
+
+/* lastBookId 与模型偏好互不干扰：一次 book.save 之后再 reset，
+ * 上次读的书必须还在（否则重开面板时书签位置就丢了）。 */
+const { createHash } = await import('node:crypto');
+const bookIdOfFor = (p) => createHash('md5').update(path.resolve(p)).digest('hex').slice(0, 16);
+await ok('model.save', { provider: 'workbuddy', model: 'hy3' });
+await ok('book.save', { path: bookPath, progress: { chapterIndex: 2, scrollRatio: 0.5 } });
+const withLast = JSON.parse(await fs.readFile(path.join(dataDir, 'settings.json'), 'utf8'));
+assert.equal(withLast.lastBookId, bookIdOfFor(bookPath), 'book.save 必须记下 lastBookId');
+await ok('model.reset');
+const stillThere = JSON.parse(await fs.readFile(path.join(dataDir, 'settings.json'), 'utf8'));
+assert.equal(stillThere.lastBookId, bookIdOfFor(bookPath), 'reset 后 lastBookId 必须还在');
+
+/* 站内模型走 model.test：桩 llm 有回应才算通 */
+const siteTest = await ok('model.test');
+assert.equal(siteTest.source, 'default', '跟随默认时应报告走 DSH 默认模型');
+assert.ok(siteTest.sample.length > 0, 'model.test 要带回一句样本');
+
+/* 只有 provider/model 没有自定义端点时，source 报 picked */
+await ok('model.save', { provider: 'deepseek', model: 'deepseek-chat' });
+const pickedTest = await ok('model.test');
+assert.equal(pickedTest.source, 'picked', '显式挑了站内模型时应报 picked');
+
+/* 什么都没配（宿主也没有默认模型）时，必须明确报错而不是崩 */
+const savedSelection = fakeDefaultModel.currentSelection;
+fakeDefaultModel.currentSelection = () => undefined;
+await ok('model.reset');
+const noRoute = await post('model.test');
+assert.equal(noRoute.json.error && noRoute.json.error.code, 'no-model', '没有可用模型时必须报 no-model');
+fakeDefaultModel.currentSelection = savedSelection;
