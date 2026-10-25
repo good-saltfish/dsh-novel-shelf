@@ -8,6 +8,16 @@
 
 ![DSH 整体界面，右侧栏打开「小说书架」](docs/screenshot-full.png)
 
+## v0.2.0 新增 / What's new in v0.2.0
+
+这一版把「AI 陪读」做成了真正能用的东西，也修掉了几个用着难受的毛病：
+
+- **陪读常驻，不再藏在面板里**：以前轮询器挂在「AI 陪读」面板上，面板一关轮询就停、悬浮人物也没了。现在开关一开就**立刻说一句**，然后按你设的间隔继续；面板收起时右下角的人物和气泡照样在。
+- **右下角悬浮人物 + 气泡**：阅读时有个小人站在右下角吐槽，点它展开气泡看历史吐槽。
+- **模型可以自己挑**：在「模型」面板里列出 DSH 已注册的 provider 和它们的模型，直接选；也可以自己填 **OpenAI 兼容端点 + API key**（baseURL / apiKey / 模型名），走你自己的额度。
+- **报错说人话**：之前只会显示「模型没有返回内容」，现在直接告诉你是**哪个路由**出的问题、**什么原因**（key 无效 / 没登录 / 模型名不存在 / 额度不足），provider 自己没配好时错误也直接摆在面板里。
+- **切会话不丢阅读页**：之前切到别的会话再回来会退回书架首页，现在阅读状态按会话记住，回到原处接着看。
+
 ## 功能 / Features
 
 - **右侧栏阅读**：作为 DSH 原生右栏标签打开，不开新窗口、不切应用，主界面继续留着你的项目，小说和干活同时进行。
@@ -19,8 +29,8 @@
 - **阅读进度**：章节号与滚动比例自动回写，重开自动回到原处。
 - **五套配色**：白 / 护眼绿 / 米黄 / 深灰 / 纯黑，与 [novel-reader](https://github.com/) 的 `body[data-theme]` 同名同色。
 - **与 novel-reader 共用数据**：读写 `%APPDATA%/novel-reader` 下的 `books.json`、`settings.json`、`annotations/*.json`，两边切换主题/进度即时同步。
-- **零依赖**：只用 Node 内置模块与 DSH 宿主自带的服务，不引入第三方运行时依赖，不做网络请求。
-- **AI 陪读（默认关闭）**：开着之后 AI 每隔一段时间就着刚读到的内容吐槽一句，可选毒舌/温柔/侦探/摆烂四种风格，也可以点「现在就说」立刻来一句。不开就一次都不调用模型。详见 [docs/ai-companion.md](docs/ai-companion.md)。
+- **零依赖**：只用 Node 内置模块与 DSH 宿主自带的服务，不引入第三方运行时依赖。除了你主动打开的 AI 陪读之外，插件本身不做任何网络请求。
+- **AI 陪读（默认关闭）**：开着之后 AI 每隔一段时间就着刚读到的内容吐槽一句，可选毒舌/温柔/侦探/摆烂四种风格，也可以点「现在就说」立刻来一句。开关一开就自动开口，**不必先展开面板**；右下角常驻一个陪读人物和吐槽气泡。模型可在「模型」面板里从 DSH 已注册的 provider 里挑，也可自己填 OpenAI 兼容端点 + API key。不开就一次都不调用模型。详见 [docs/ai-companion.md](docs/ai-companion.md)。
 
 ### 内置书目是怎么装上的 / How the bundled books work
 
@@ -71,6 +81,8 @@ dsh plugin --profile desktop add file:<tgz 路径>
 6. **翻章与导航**：顶部「上一章 / 下一章」翻章，标题栏右侧的目录按钮展开章节列表，搜索框做全书全文检索（回车搜索，命中会给出章节名与上下文片段）。
 7. **调阅读体验**：底部滑块调字号，底部五个色板切换背景（白 / 护眼 / 米黄 / 深灰 / 纯黑）。
 8. **进度自动保存**：章节号与滚动比例写回 `%APPDATA%/novel-reader/annotations/<id>.json`，关掉再开自动回到原处。
+9. **想要陪读**：点底部 **「AI 陪读」** → 打开开关，立刻就有第一句吐槽；右下角会出现陪读人物，点它看气泡。间隔与风格在同一个面板里调。
+10. **换模型**：点底部 **「模型」**，从 DSH 已注册的 provider 里挑一个，或自填 OpenAI 兼容端点 + API key；点「测试」会真发一次请求，成功给样例、失败说明是哪个路由出了什么问题。不配就用 DSH 的默认模型。
 
 > 右侧栏宽度有限，直接把窗口拉宽或切到更宽的布局阅读更舒服。
 
@@ -78,7 +90,7 @@ dsh plugin --profile desktop add file:<tgz 路径>
 
 理解这几步有助于自己改这个插件：
 
-1. **Host 半边（`lib/host.js`）** 在 `ctx.effect()` 里用 `ctx.webServer.register({kind:'prefix', path:'/novel-shelf/api'})` 挂一条前缀路由，对外提供 8 个方法：`library.get` / `library.add` / `library.remove` / `book.open` / `book.chapter` / `book.save` / `settings.save` / `book.search`。
+1. **Host 半边（`lib/host.js`）** 在 `ctx.effect()` 里用 `ctx.webServer.register({kind:'prefix', path:'/novel-shelf/api'})` 挂一条前缀路由，对外提供 19 个方法：书架 `library.get` / `library.add` / `library.remove`，正文 `book.open` / `book.chapter` / `book.save` / `book.search`，设置 `settings.save`，模型 `model.options` / `model.save` / `model.reset` / `model.test`，陪读 `companion.get` / `companion.config` / `companion.tick` / `companion.nudge` / `companion.clear`，以及按会话记阅读页的 `reader.session.get` / `reader.session.set`。
 2. **每条请求先过信任栅栏**：`ctx.connection.requestRejection(req)` 判定是否来自可信的浏览器会话（命令行直连一律 403），再叠加 `Sec-Fetch-Site` 跨站拒绝；方法名用 `Object.hasOwn(api, method)` 做白名单，`Object.hasOwn` 防的是 `POST /novel-shelf/api/constructor` 这类原型成员命中；请求体上限 1 MiB。
 3. **Host 半边做真正的 IO**：读盘、编码探测、章节切分、全文检索、JSON 落盘（写临时文件再 rename；读到损坏 JSON 先备份成 `*.corrupt-<时间戳>` 再回退，不静默覆盖）。路径一律 `path.resolve` 归一。
 4. **Client 半边（`lib/client.js`）** 通过 `window.__ModuleLoader__.load({id:'dsh-novel-shelf', factory})` 挂载。它先 `ctx.inject(['sidebarRight','sidebarRightTabs'], ...)` 拿到右栏标签注册表，注册一个 tab 类型（`id = dsh-novel-shelf/reader`，`kind = dsh-novel-shelf:reader`），再通过 `ctx.slots.inject('sidebar.right.pane.tab', ...)` 占用两个 keyed 座位（正文与标题）。
@@ -103,20 +115,25 @@ JSON 文件损坏时插件会先备份为 `*.corrupt-<时间戳>` 再回退到�
 
 ## 隐私 / Privacy
 
-- 全部数据留在本机插件数据目录，插件不做任何网络请求。
+- 全部数据留在本机插件数据目录。
+- **不开 AI 陪读时插件不做任何网络请求**；开了以后只有「你刚读到的那一小段原文」（约 6 个自然段、上限 1200 字）会发给你在 DSH 里配置的那一家模型服务商，不经任何第三方中转。想让原文完全不出本机，就别开这个开关。
 - 宿主路由带官方信任栅栏（`ctx.connection.requestRejection`）与跨站请求拒绝，命令行直连会被拒。
 - 只接受 `.txt`；请求体上限 1 MiB；API 方法白名单用 `Object.hasOwn` 防原型成员。
+- 陪读日志 `%APPDATA%/novel-reader/plugin-client.log` 只记标签与计数，不记正文。
 
 ## 开发 / Development
 
 ### 目录结构
 
 ```
-lib/host.js            宿主半边：文件 IO、编码探测、章节切分、全文检索、JSON 落盘、HTTP 路由
-lib/client.js          客户端半边：右栏标签注册、书架/阅读页组件、五套主题样式
+lib/host.js            宿主半边：文件 IO、编码探测、章节切分、全文检索、JSON 落盘、HTTP 路由、模型目录与陪读
+lib/client.js          客户端半边：右栏标签注册、书架/阅读页/陪读面板/模型面板、五套主题样式
+assets/reader-avatar.png  陪读人物（右下角悬浮，PNG 约 114 KB）
 books/                 内置的三本 txt（约 7.3 MB，随 bundle 分发，首次运行时复制到数据目录）
 locale/zh.json         中文文案
 locale/en.json         英文文案
+docs/ai-companion.md    AI 陪读说明（模型怎么配、隐私边界）
+docs/screenshot-*.png  截图
 test/hosttest.mjs      宿主半边单测
 test/smoke.mjs         客户端半边交互冒烟（自带极简 React 桩）
 screenshots.json       插件市场截图声明
@@ -132,7 +149,7 @@ npm test        # host 半边单测 + client 半边交互冒烟（自带极简 R
 
 ```sh
 npm pack --pack-destination .
-dsh plugin --profile desktop add file:.\dsh-novel-shelf-0.1.0.tgz
+dsh plugin --profile desktop add file:.\dsh-novel-shelf-0.2.0.tgz
 ```
 
 改完 client 半边记得**刷新页面**再验证；改完 host 半边需要重装 bundle。
@@ -142,7 +159,7 @@ dsh plugin --profile desktop add file:.\dsh-novel-shelf-0.1.0.tgz
 ```sh
 npm version patch
 npm pack --pack-destination .
-gh release upload v0.1.1 dsh-novel-shelf-0.1.1.tgz --repo good-saltfish/dsh-novel-shelf
+gh release upload v0.2.0 dsh-novel-shelf-0.2.0.tgz --repo good-saltfish/dsh-novel-shelf
 ```
 
 Release 资产名建议带版本号（`dsh-novel-shelf-<版本>.tgz`），目录条目里用固定版本路径 `releases/download/v<版本>/<资产名>`，避免 `latest/download/` 在下个版本时 404。

@@ -49,12 +49,28 @@ globalThis.fetch = async (url, init) => {
   const method = String(url).split('/').pop();
   const body = init && init.body ? JSON.parse(init.body) : {};
   requests.push({ method, url: String(url), body, init });
+  /* 真实 host 里 companion.config 有记忆：写进去的 enabled/style
+     之后 companion.get 会读出来。桩要照做，否则测的是假绿。 */
+  if (method === 'companion.config') {
+    if (typeof body.enabled === 'boolean') companionState.enabled = body.enabled;
+    if (typeof body.intervalMs === 'number') companionState.intervalMs = body.intervalMs;
+    if (typeof body.style === 'string') companionState.style = body.style;
+  }
+  if (method === 'companion.clear') companionState.lines = [];
   const entry = RESPONSES[method];
   const value = entry && entry.byIndex ? entry.byIndex(body.index || 0) : (entry ? entry.value : undefined);
   const text = JSON.stringify(entry && entry.ok === false
     ? { ok: false, error: { code: 'e', message: entry.message } }
     : { ok: true, value: value || {} });
   return { status: 200, text: async () => text };
+};
+
+/* 陪读状态是「有记忆」的：真实 host 里 companion.config 会把 enabled/style
+   记下来，之后 companion.get 再读出来。桩必须同样有状态，
+   否则「开启陪读」这一段永远读回 enabled:false，
+   自动说话那条链路根本走不到，测试就成了假绿。 */
+const companionState = {
+  enabled: false, intervalMs: 300000, style: 'roast', lines: [], pending: false, hasModel: true, error: '',
 };
 
 const RESPONSES = {
@@ -66,7 +82,7 @@ const RESPONSES = {
   'book.save': { value: { saved: true } },
   'book.search': { value: { results: [], total: 0 } },
   'settings.save': { value: {} },
-  'companion.get': { value: { enabled: false, intervalMs: 300000, style: 'roast', lines: [], pending: false, hasModel: true, error: '' } },
+  'companion.get': { get value() { return { ...companionState }; } },
   'companion.config': { value: {} },
   'companion.nudge': { value: {} },
   'companion.clear': { value: {} },
@@ -75,6 +91,7 @@ const RESPONSES = {
     value: {
       providers: [
         { id: 'deepseek-official', name: 'DeepSeek', models: [{ id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash' }] },
+        { id: 'deepseek-account', name: 'DeepSeek Account', models: [], error: '还没登录 DeepSeek 账号' },
         { id: 'workbuddy-global', name: 'WorkBuddy', models: [{ id: 'hy3', name: 'HY3' }] },
       ],
       current: { provider: '', model: '' },
@@ -458,13 +475,15 @@ assert.ok(requests.some((r) => r.method === 'settings.save' && r.body.fontSize =
 
 /* --------------------------------------------------------------- AI 陪读 */
 
-/* 陪读面板默认收起：Reader 挂载时不许打 companion.* 请求。
- * 这条断言的意义是「默认不调用模型」——用户没开就不花钱。 */
+/* 陪读面板默认收起：Reader 挂载时不许打任何「会花钱」的请求。
+   注意陪读组件是常驻挂载的（面板开合只控制画不画 UI），
+   所以 companion.get 这种读状态是允许的；真正不许出现的是
+   companion.tick / companion.nudge —— 它们会真的调模型。 */
 requests.length = 0;
 for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
 assert.ok(
-  !requests.some((r) => String(r.method).startsWith('companion.')),
-  '陪读默认关闭：Reader 挂载时不得发起任何 companion.* 请求',
+  !requests.some((r) => r.method === 'companion.tick' || r.method === 'companion.nudge'),
+  '陪读默认关闭：不得发起任何会调用模型的 companion.tick / companion.nudge',
 );
 
 /* 展开陪读面板 */
@@ -501,14 +520,19 @@ requests.length = 0;
 const onBtn = findAll(tree, 'nr-btn').find((b) => b.props.children === '已关闭');
 assert.ok(onBtn, '关闭态要显示「已关闭」按钮');
 onBtn.props.onClick();
-await flush();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
 assert.ok(
   requests.some((r) => r.method === 'companion.config' && r.body.enabled === true),
   '点开启必须写回 enabled=true',
 );
+/* 开关一开就该立刻说一句，不该让读者干等一个周期。 */
+assert.ok(
+  requests.some((r) => r.method === 'companion.tick'),
+  '开启陪读必须立刻 tick 一次（自动说话）',
+);
 assert.ok(
   !requests.some((r) => r.method === 'companion.nudge'),
-  '开启本身不得调用模型（要等间隔到点）',
+  '自动说话走 tick，不得冒充「现在就说」',
 );
 
 /* 「现在就说」必须把章号/章名/正文摘要一起报上去 */
@@ -529,6 +553,7 @@ assert.ok(typeof nudge.body.excerpt === 'string' && nudge.body.excerpt.length > 
    挂载 effect 不会每帧重跑 —— 所以要让「下一次拉状态」失败，
    必须把面板卸载再挂载（关掉 → 重新打开）。 */
 requests.length = 0;
+const companionGetOriginal = RESPONSES['companion.get'];
 RESPONSES['companion.get'] = { ok: false, message: 'boom' };
 findAll(tree, 'nr-btn').find((b) => b.props.children === 'AI 陪读').props.onClick();
 for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
@@ -538,7 +563,8 @@ for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStu
 assert.ok(requests.some((r) => r.method === 'companion.get'), '重新打开必须再拉一次状态');
 assert.ok(findAll(tree, 'nr-error').length >= 1, '陪读出错要在面板内显示错误');
 assert.ok(findAll(tree, 'nr-reader').length === 1, '陪读出错不得影响正文渲染');
-RESPONSES['companion.get'] = { value: { enabled: false, intervalMs: 300000, style: 'roast', lines: [], pending: false, hasModel: true, error: '' } };
+RESPONSES['companion.get'] = companionGetOriginal;
+Object.assign(companionState, { enabled: false, intervalMs: 300000, style: 'roast', lines: [], pending: false, hasModel: true, error: '' });
 
 /* --------------------------------------------------------------- 悬浮人物 + 气泡 */
 
@@ -548,12 +574,10 @@ for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStu
 assert.equal(findAll(tree, 'nr-avatar').length, 0, '陪读未开启时不得出现悬浮人物');
 
 /* 陪读开着且有吐槽：右下角出现人物 + 气泡 */
-RESPONSES['companion.get'] = {
-  value: {
-    enabled: true, intervalMs: 300000, style: 'roast', pending: false, hasModel: true, error: '',
-    lines: [{ at: '2026-10-25T10:00:00Z', chapterIndex: 1, chapterTitle: '第二章', text: '这段有点水' }],
-  },
-};
+Object.assign(companionState, {
+  enabled: true, intervalMs: 300000, style: 'roast', pending: false, hasModel: true, error: '',
+  lines: [{ at: '2026-10-25T10:00:00Z', chapterIndex: 1, chapterTitle: '第二章', text: '这段有点水' }],
+});
 /* 面板当前是开着的（上一段重新打开过），先关掉再打开，
    让 Companion 重新挂载、去 host 拉一次新状态。 */
 findAll(tree, 'nr-btn').find((b) => b.props.children === 'AI 陪读').props.onClick();
@@ -595,9 +619,7 @@ assert.ok(
 
 /* 一条吐槽都没有时：不画气泡，连人物也不该出现（避免空占位）
    状态是随陪读面板挂载时从 host 拉来的，所以要先关再开，让它重新拉一次。 */
-RESPONSES['companion.get'] = {
-  value: { enabled: true, intervalMs: 300000, style: 'roast', lines: [], pending: false, hasModel: true, error: '' },
-};
+Object.assign(companionState, { enabled: true, intervalMs: 300000, style: 'roast', lines: [], pending: false, hasModel: true, error: '' });
 findAll(tree, 'nr-btn').find((b) => b.props.children === 'AI 陪读').props.onClick();
 for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
 findAll(tree, 'nr-btn').find((b) => b.props.children === 'AI 陪读').props.onClick();
@@ -606,7 +628,7 @@ assert.equal(findAll(tree, 'nr-avatar-bubble').length, 0, '没有吐槽时不得
 assert.equal(findAll(tree, 'nr-avatar').length, 0, '没有吐槽时连人物也不占地方');
 
 /* 恢复默认桩，避免影响后面的用例 */
-RESPONSES['companion.get'] = { value: { enabled: false, intervalMs: 300000, style: 'roast', lines: [], pending: false, hasModel: true, error: '' } };
+Object.assign(companionState, { enabled: false, intervalMs: 300000, style: 'roast', lines: [], pending: false, hasModel: true, error: '' });
 
 /* --------------------------------------------------------------- 模型选择 */
 
@@ -624,6 +646,17 @@ assert.ok(providerSelect, '模型面板必须有 provider 下拉');
 const providerIds = providerSelect.props.children.map((o) => o.props.value);
 assert.ok(providerIds.includes('deepseek-official'), 'provider 下拉必须列出 DSH 已注册的 provider，实际 ' + JSON.stringify(providerIds));
 
+/* 选了还没配好的 provider：界面必须把 provider 自带的错误摆出来，
+   否则读者只看到「模型没保存成功」，不知道是那个 provider 还没登录。 */
+requests.length = 0;
+providerSelect.props.onChange({ target: { value: 'deepseek-account' } });
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+const providerErrors = findAll(tree, 'nr-error');
+assert.ok(
+  providerErrors.some((n) => String(n.props.children).includes('还没登录')),
+  'provider 自带的错误必须显示在面板里，实际：' + JSON.stringify(providerErrors.map((n) => n.props.children)),
+);
+
 /* 选一个 provider 后保存：必须发 model.save */
 requests.length = 0;
 const modelSaves = findAll(tree, 'nr-btn').filter((b) => String(b.props.children).includes('保存'));
@@ -635,6 +668,13 @@ assert.ok(savedModel, '保存模型必须调 model.save');
 assert.ok(typeof savedModel.body.provider === 'string', 'model.save 必须带 provider');
 
 /* --------------------------------------------------------------- 注销 */
+
+/* 先跑掉所有 effect 的清理函数：陪读的轮询是 setInterval，
+   不清掉它 node 进程会一直挂着不退。 */
+for (const [key, fn] of Array.from(effectCleanups.entries())) {
+  try { fn(); } catch { /* 清理失败不该让测试炸 */ }
+  effectCleanups.delete(key);
+}
 
 for (const d of disposers.reverse()) d();
 assert.equal(tabTypes.length, 0, 'dispose must unregister the tab type');

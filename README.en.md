@@ -8,6 +8,17 @@
 
 ![The whole DSH window with the "小说书架 / Novel Shelf" tab open in the right sidebar](docs/screenshot-full.png)
 
+## What's new in v0.2.0
+
+This release turns the AI reading companion into something you actually use, and fixes a few things that got in the way:
+
+- **The companion is no longer hidden behind the panel**: the polling used to live inside the "AI 陪读" panel, so closing it stopped the polling and the avatar vanished. Now switching it on makes it **say something right away**, then keeps going on your chosen interval; the little character and its speech bubble stay in the corner while the panel is closed.
+- **A floating character with a speech bubble** in the bottom-right corner of the reader.
+- **Pick your own model**: the "模型" panel lists the providers registered inside DSH together with their models; pick one, or fill in your own **OpenAI-compatible endpoint + API key** (baseURL / apiKey / model id) and bill it to your own account.
+- **Errors that say what is wrong**: instead of a bare "模型没有返回内容", you now get the **route** that failed and the **reason** (invalid key / not signed in / unknown model / quota), and a provider that is not configured yet shows its own error right in the panel.
+- **Switching conversations no longer loses your page**: leaving for another session used to drop you back on the shelf; the open book is now remembered per session.
+- **The reading position is restored across sessions**, and the progress file is written back reliably.
+
 ## Features
 
 - **Right-sidebar reading**: opens as a native DSH right-sidebar tab — no new window, no app switch. Your project stays on screen while the novel rides along.
@@ -19,8 +30,8 @@
 - **Reading progress**: chapter index and scroll ratio are written back and restored on reopen.
 - **Five colour schemes**: white / eye-care green / sepia / dark grey / pure black, matching novel-reader's `body[data-theme]` names and colours.
 - **Shares data with novel-reader**: reads and writes `books.json`, `settings.json` and `annotations/*.json` under `%APPDATA%/novel-reader`, so theme and progress stay in sync with the desktop app.
-- **Zero runtime dependencies**: only Node built-ins and services the DSH host already provides. No third-party dependency, no network request.
-- **AI reading companion (off by default)**: once switched on, the AI roasts whatever you just read every few minutes, in four styles (roast / warm / detective / slacker), or on demand with "say it now". Off means the model is never called. See [docs/ai-companion.md](docs/ai-companion.md).
+- **Zero runtime dependencies**: only Node built-ins and services the DSH host already provides. No third-party dependency. The plugin makes no network request of its own, except the AI companion you switch on yourself.
+- **AI reading companion (off by default)**: once switched on, the AI roasts whatever you just read every few minutes, in four styles (roast / warm / detective / slacker), or on demand with "say it now". Switching it on makes it speak immediately — you do **not** have to open the panel first — and the companion character plus its speech bubble stay in the corner. Pick a model from the providers registered in DSH, or supply your own OpenAI-compatible endpoint and API key. Off means the model is never called. See [docs/ai-companion.md](docs/ai-companion.md).
 
 ### How the bundled books work
 
@@ -71,6 +82,8 @@ dsh plugin --profile desktop add file:<tgz path>
 6. **Navigate**: "上一章 / 下一章" switch chapters, the catalogue button next to the title opens the chapter list, and the search box runs a full-text search over the book (press Enter; a hit reports the chapter name plus a context snippet).
 7. **Tune the page**: the bottom slider changes the font size, the five swatches switch the background (white / eye-care / sepia / dark grey / pure black).
 8. **Progress is saved for you**: the chapter index and scroll ratio are written to `%APPDATA%/novel-reader/annotations/<id>.json`, so reopening lands you where you left off.
+9. **Want the companion**: click **"AI 陪读"** at the bottom, flip the switch, and the first remark arrives right away; the companion character shows up in the corner and clicking it opens the bubble. The interval and the style live in the same panel.
+10. **Change the model**: click **"模型"** at the bottom, pick one of the providers registered in DSH, or fill in your own OpenAI-compatible endpoint and API key. "测试" sends one real minimal request — a sample on success, and on failure it names the route and the reason. With nothing configured you get the DSH default model.
 
 > The right sidebar is narrow — widen the window for a more comfortable reading column.
 
@@ -78,7 +91,7 @@ dsh plugin --profile desktop add file:<tgz path>
 
 Useful background if you want to modify the plugin yourself:
 
-1. **Host half (`lib/host.js`)** registers a prefix route inside `ctx.effect()` with `ctx.webServer.register({kind:'prefix', path:'/novel-shelf/api'})`, exposing 8 methods: `library.get` / `library.add` / `library.remove` / `book.open` / `book.chapter` / `book.save` / `settings.save` / `book.search`.
+1. **Host half (`lib/host.js`)** registers a prefix route inside `ctx.effect()` with `ctx.webServer.register({kind:'prefix', path:'/novel-shelf/api'})`, exposing 19 methods: shelf `library.get` / `library.add` / `library.remove`, text `book.open` / `book.chapter` / `book.save` / `book.search`, settings `settings.save`, model `model.options` / `model.save` / `model.reset` / `model.test`, companion `companion.get` / `companion.config` / `companion.tick` / `companion.nudge` / `companion.clear`, plus `reader.session.get` / `reader.session.set` which remember the open page per session.
 2. **Every request passes a trust fence first**: `ctx.connection.requestRejection(req)` decides whether the call comes from a trusted browser session (a bare command-line call is always 403), backed by a `Sec-Fetch-Site` cross-site rejection. Method names are allow-listed with `Object.hasOwn(api, method)` so prototype members such as `POST /novel-shelf/api/constructor` cannot be reached. Request bodies are capped at 1 MiB.
 3. **The host half does the real IO**: disk reads, encoding detection, chapter splitting, full-text search and JSON persistence (write to a temp file then rename; a corrupt JSON is first backed up as `*.corrupt-<timestamp>` and then falls back instead of being silently overwritten). Paths are always normalised with `path.resolve`.
 4. **Client half (`lib/client.js`)** mounts through `window.__ModuleLoader__.load({id:'dsh-novel-shelf', factory})`. It first calls `ctx.inject(['sidebarRight','sidebarRightTabs'], ...)` to obtain the right-sidebar tab registry, registers a tab type (`id = dsh-novel-shelf/reader`, `kind = dsh-novel-shelf:reader`), then occupies two keyed slots through `ctx.slots.inject('sidebar.right.pane.tab', ...)` (body and title).
@@ -103,20 +116,24 @@ When a JSON file is corrupt the plugin first backs it up as `*.corrupt-<timestam
 
 ## Privacy
 
-- All data stays in the local plugin data directory; the plugin makes no network request.
+- All data stays in the local plugin data directory. **With the AI companion off, the plugin makes no network request at all**; with it on, only the short passage you just read (about six paragraphs, 1200 characters at most) is sent to the one model provider you configured inside DSH — no third-party relay. If the text must not leave your machine, leave the switch off.
 - The host route uses the official trust fence (`ctx.connection.requestRejection`) and rejects cross-site requests, so a bare command-line call is denied.
 - Only `.txt` is accepted, request bodies are capped at 1 MiB, and the API method allow-list uses `Object.hasOwn` so prototype members cannot be reached.
+- The companion log `%APPDATA%/novel-reader/plugin-client.log` records tags and counters only, never the text.
 
 ## Development
 
 ### Layout
 
 ```
-lib/host.js            host half: file IO, encoding detection, chapter splitting, full-text search, JSON persistence, HTTP route
-lib/client.js          client half: right-sidebar tab registration, shelf and reader components, five theme palettes
+lib/host.js            host half: file IO, encoding detection, chapter splitting, full-text search, JSON persistence, HTTP route, model catalog, companion
+lib/client.js          client half: right-sidebar tab registration, shelf / reader / companion panel / model panel, five theme palettes
+assets/reader-avatar.png  the companion character (floating in the corner, ~114 KB PNG)
 books/                 the three bundled txt files (~7.3 MB, shipped with the bundle, copied to the data dir on first run)
 locale/zh.json         Chinese strings
 locale/en.json         English strings
+docs/ai-companion.md    how the AI companion is configured and what it sends out
+docs/screenshot-*.png  screenshots
 test/hosttest.mjs      host-half unit tests
 test/smoke.mjs         client-half interaction smoke test (self-contained minimal React stub)
 screenshots.json       plugin-market screenshot declaration
@@ -132,7 +149,7 @@ npm test        # host-half unit tests + client-half interaction smoke test (sel
 
 ```sh
 npm pack --pack-destination .
-dsh plugin --profile desktop add file:.\dsh-novel-shelf-0.1.0.tgz
+dsh plugin --profile desktop add file:.\dsh-novel-shelf-0.2.0.tgz
 ```
 
 After changing the client half, **refresh the page** before verifying. After changing the host half, reinstall the bundle.
@@ -142,7 +159,7 @@ After changing the client half, **refresh the page** before verifying. After cha
 ```sh
 npm version patch
 npm pack --pack-destination .
-gh release upload v0.1.1 dsh-novel-shelf-0.1.1.tgz --repo good-saltfish/dsh-novel-shelf
+gh release upload v0.2.0 dsh-novel-shelf-0.2.0.tgz --repo good-saltfish/dsh-novel-shelf
 ```
 
 Name the release asset with its version (`dsh-novel-shelf-<version>.tgz`) and reference it from the catalog entry with a pinned path `releases/download/v<version>/<asset>`, so `latest/download/` does not 404 on the next release.

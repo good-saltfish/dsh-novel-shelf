@@ -595,3 +595,30 @@ await ok('model.reset');
 const noRoute = await post('model.test');
 assert.equal(noRoute.json.error && noRoute.json.error.code, 'no-model', '没有可用模型时必须报 no-model');
 fakeDefaultModel.currentSelection = savedSelection;
+
+/* 模型报错（401/额度用尽这类）时，model.test 必须把「哪个路由不通」和
+ * 「为什么不通」一起报出来。只说「模型没有返回内容」的话，
+ * 用户只会以为插件坏了，实际往往是他自己填的 key 无效。 */
+const failingLlm = fakeLlm;
+const savedStream = failingLlm.stream;
+failingLlm.stream = async function* () {
+  yield {
+    type: 'finish',
+    reason: {
+      kind: 'error',
+      failure: { message: 'Authentication Fails, Your api key: ****8cc4 is invalid', code: 'AUTH', status: 401 },
+    },
+  };
+};
+await ok('model.save', { provider: 'deepseek-official', model: 'deepseek-flash' });
+const failedTest = await post('model.test');
+assert.equal(failedTest.json.error && failedTest.json.error.code, 'model-failed', '模型报错必须归类为 model-failed');
+assert.ok(
+  String(failedTest.json.error.message).includes('deepseek-official/deepseek-flash'),
+  '报错必须带出是哪个路由不通，实际：' + String(failedTest.json.error && failedTest.json.error.message),
+);
+assert.ok(
+  String(failedTest.json.error.message).includes('invalid'),
+  '报错必须带出模型的真实原因，实际：' + String(failedTest.json.error && failedTest.json.error.message),
+);
+failingLlm.stream = savedStream;
