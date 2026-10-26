@@ -1,6 +1,6 @@
 # dsh-novel-shelf
 
-**Office-sloof reading**: keep a local txt novel in the DSH (DeepSeek Harness) right sidebar while you keep working on your project.
+**Office-sloof reading**: keep a local txt novel in the DSH (DeepSeek Harness) right sidebar while you keep working on your project. Since v0.2.0 it also ships an **AI companion** that comments on whatever you just read.
 
 ![plugin](https://img.shields.io/badge/dsh--plugin-4d6bfe)
 
@@ -25,7 +25,7 @@ This release turns the AI reading companion into something you actually use, and
 
 - **Right-sidebar reading**: opens as a native DSH right-sidebar tab — no new window, no app switch. Your project stays on screen while the novel rides along.
 - **Local txt shelf**: add books by absolute path; the plugin only reads files, never uploads them.
-- **Three books built in**: 《十日终焉》, 《我在精神病院学斩神》 and 《我不是戏神》 land on the shelf automatically the first time you open the sidebar — no file hunting, no path config. Remove them if you want; they stay removed.
+- **Three books built in**: three novels land on the shelf automatically the first time you open the sidebar — no file hunting, no path config. Remove them if you want; they stay removed.
 - **Chapter splitting**: recognises `第 N 章 / 节 / 回 / 卷 / 篇` headings, with a length-based fallback.
 - **Encoding detection**: UTF-8 / UTF-8 BOM / UTF-16LE / UTF-16BE / GB18030.
 - **Full-text search**: matches within chapters and reports the chapter name plus a context snippet.
@@ -33,7 +33,7 @@ This release turns the AI reading companion into something you actually use, and
 - **Five colour schemes**: white / eye-care green / sepia / dark grey / pure black, matching novel-reader's `body[data-theme]` names and colours.
 - **Shares data with novel-reader**: reads and writes `books.json`, `settings.json` and `annotations/*.json` under `%APPDATA%/novel-reader`, so theme and progress stay in sync with the desktop app.
 - **Zero runtime dependencies**: only Node built-ins and services the DSH host already provides. No third-party dependency. The plugin makes no network request of its own, except the AI companion you switch on yourself.
-- **AI reading companion (off by default)**: once switched on, the AI roasts whatever you just read every few minutes, in four styles (roast / warm / detective / slacker), or on demand with "say it now". Switching it on makes it speak immediately — you do **not** have to open the panel first — and the companion character plus its speech bubble stay in the corner. Pick a model from the providers registered in DSH, or supply your own OpenAI-compatible endpoint and API key. Off means the model is never called. See [docs/ai-companion.md](docs/ai-companion.md).
+- **AI companion (off by default)**: once switched on, the AI roasts whatever you just read every few minutes, in four styles (roast / warm / detective / slacker), or on demand with "say it now". Switching it on makes it speak immediately — you do **not** have to open the panel first — and the companion character plus its speech bubble stay in the corner. Pick a model from the providers registered in DSH, or supply your own OpenAI-compatible endpoint and API key. Off means the model is never called. See [docs/ai-companion.md](docs/ai-companion.md).
 
 ### How the bundled books work
 
@@ -78,7 +78,7 @@ dsh plugin --profile desktop add file:<tgz path>
 
 1. **Open the right sidebar**: click the right-column button in the top-right of the DSH window.
 2. **Pick the "小说书架" tab**: choose it in the tab bar at the top of the right sidebar to reach the shelf.
-3. **Three books are already there**: on the first open the bundled 《十日终焉》, 《我在精神病院学斩神》 and 《我不是戏神》 are copied out of the plugin and added to the shelf automatically. Click one to start reading right away.
+3. **Three books are already there**: on the first open the three bundled novels are copied out of the plugin and added to the shelf automatically. Click one to start reading right away.
 4. **Add more books**: type the **absolute path** of a local txt file (e.g. `D:\books\foo.txt`) in the input box and press Enter. The title shows up in the list.
 5. **Start reading**: click a title — the chapter text appears directly in the right sidebar.
 6. **Navigate**: "上一章 / 下一章" switch chapters, the catalogue button next to the title opens the chapter list, and the search box runs a full-text search over the book (press Enter; a hit reports the chapter name plus a context snippet).

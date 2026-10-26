@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Novel Shelf",
-    "description": "Keep a local txt novel open in the DSH right sidebar while you work on a project — 《十日终焉》, 《我在精神病院学斩神》 and 《我不是戏神》 ship bundled, and shelf, progress and theme are shared with the desktop novel-reader app."
+    "description": "Keep a local txt novel open in the DSH right sidebar while you work on a project — three novels ship bundled so a fresh install already has a shelf, and shelf, progress and theme are shared with the desktop novel-reader app. New in v0.2.0: an AI companion that comments on whatever you just read, with a character floating in the corner; pick any model provider registered in DSH or point it at your own OpenAI-compatible endpoint and API key."
   }
 }
