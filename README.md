@@ -1,6 +1,6 @@
 # dsh-novel-shelf
 
-**办公摸鱼专用**：在 DSH（DeepSeek Harness）右侧栏里看本地 txt 小说，边看小说边做项目。v0.2.0 起还带一个 **AI 伴读**，边读边吐槽。English version: [README.en.md](README.en.md)
+**办公摸鱼专用**：在 DSH（DeepSeek Harness）右侧栏里看本地 txt 小说，边看小说边做项目。v0.2.0 起还带一个 **AI 陪读**，边读边吐槽。English version: [README.en.md](README.en.md)
 
 ![plugin](https://img.shields.io/badge/dsh--plugin-4d6bfe)
 
@@ -32,7 +32,7 @@
 - **五套配色**：白 / 护眼绿 / 米黄 / 深灰 / 纯黑，与 [novel-reader](https://github.com/) 的 `body[data-theme]` 同名同色。
 - **与 novel-reader 共用数据**：读写 `%APPDATA%/novel-reader` 下的 `books.json`、`settings.json`、`annotations/*.json`，两边切换主题/进度即时同步。
 - **零依赖**：只用 Node 内置模块与 DSH 宿主自带的服务，不引入第三方运行时依赖。除了你主动打开的 AI 陪读之外，插件本身不做任何网络请求。
-- **AI 伴读（默认关闭）**：开着之后 AI 每隔一段时间就着刚读到的内容吐槽一句，可选毒舌/温柔/侦探/摆烂四种风格，也可以点「现在就说」立刻来一句。开关一开就自动开口，**不必先展开面板**；右下角常驻一个陪读人物和吐槽气泡。模型可在「模型」面板里从 DSH 已注册的 provider 里挑，也可自己填 OpenAI 兼容端点 + API key。不开就一次都不调用模型。详见 [docs/ai-companion.md](docs/ai-companion.md)。
+- **AI 陪读（默认关闭）**：开着之后 AI 每隔一段时间就着刚读到的内容吐槽一句，可选毒舌/温柔/侦探/摆烂四种风格，也可以点「现在就说」立刻来一句。开关一开就自动开口，**不必先展开面板**；右下角常驻一个陪读人物和吐槽气泡。模型可在「模型」面板里从 DSH 已注册的 provider 里挑，也可自己填 OpenAI 兼容端点 + API key。不开就一次都不调用模型。详见 [docs/ai-companion.md](docs/ai-companion.md)。
 
 ### 内置书目是怎么装上的 / How the bundled books work
 

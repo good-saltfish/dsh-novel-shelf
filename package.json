@@ -1,7 +1,7 @@
 {
   "name": "dsh-novel-shelf",
   "version": "0.2.0",
-  "description": "在 DSH 右侧栏里摸鱼看本地 txt 小说，自带三本小说开箱即读，边看小说边做项目，章节、进度和主题与桌面版 novel-reader 共用；新增 AI 伴读：开关一开就自动就着刚读到的内容吐槽，右下角常驻人物与气泡，模型可在 DSH 已注册的 provider 里挑，也能自填 OpenAI 兼容端点与 API key，默认关闭。",
+  "description": "在 DSH 右侧栏里摸鱼看本地 txt 小说，自带三本小说开箱即读，边看小说边做项目，章节、进度和主题与桌面版 novel-reader 共用；新增 AI 陪读：开关一开就自动就着刚读到的内容吐槽，右下角常驻人物与气泡，模型可在 DSH 已注册的 provider 里挑，也能自填 OpenAI 兼容端点与 API key，默认关闭。",
   "type": "module",
   "main": "./lib/host.js",
   "exports": {
