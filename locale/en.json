@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Novel Shelf",
-    "description": "Keep a local txt novel open in the DSH right sidebar while you work on a project — three novels ship bundled so a fresh install already has a shelf, and shelf, progress and theme are shared with the desktop novel-reader app. New in v0.2.0: an AI companion that comments on whatever you just read, with a character floating in the corner; pick any model provider registered in DSH or point it at your own OpenAI-compatible endpoint and API key."
+    "description": "Read local TXT novels in the DSH right sidebar, with an AI companion that roasts whatever you just read — on a timer or on demand, four styles, a character and speech bubble floating in the corner. Pick any model provider registered in DSH, or your own OpenAI-compatible endpoint and API key; off by default. Three novels ship in the box, and chapters, progress and themes are shared with the desktop novel-reader app."
   }
 }
