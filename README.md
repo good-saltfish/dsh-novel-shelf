@@ -4,11 +4,11 @@
 
 ![plugin](https://img.shields.io/badge/dsh--plugin-4d6bfe)
 
+![AI 陪读：右下角陪读人物与吐槽气泡](docs/screenshot-ai-companion.png)
+
 ![DSH 右侧栏中的「小说书架」面板](docs/screenshot-right-panel.png)
 
 ![DSH 整体界面，右侧栏打开「小说书架」](docs/screenshot-full.png)
-
-![AI 陪读：右下角陪读人物与吐槽气泡](docs/screenshot-ai-companion.png)
 
 ## v0.2.0 新增 / What's new in v0.2.0
 

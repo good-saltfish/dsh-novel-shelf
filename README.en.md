@@ -4,11 +4,11 @@
 
 ![plugin](https://img.shields.io/badge/dsh--plugin-4d6bfe)
 
+![The AI companion: character in the corner with a speech bubble](docs/screenshot-ai-companion.png)
+
 ![The "小说书架 / Novel Shelf" panel in the DSH right sidebar](docs/screenshot-right-panel.png)
 
 ![The whole DSH window with the "小说书架 / Novel Shelf" tab open in the right sidebar](docs/screenshot-full.png)
-
-![The AI companion: character in the corner with a speech bubble](docs/screenshot-ai-companion.png)
 
 ## What's new in v0.2.0
 
