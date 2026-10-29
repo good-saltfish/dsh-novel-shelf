@@ -10,6 +10,16 @@
 
 ![DSH 整体界面，右侧栏打开「小说书架」](docs/screenshot-full.png)
 
+## v0.3.0 新增 / What's new in v0.3.0
+
+这一版补上了书架最缺的东西：**能自己把书导进来**，不用先去文件管理器里翻绝对路径。
+
+- **三条导入路径**：工具栏的 `+` 打开导入面板——**选文件**（也可以直接把 txt 拖进来）、**浏览目录**、**手填路径**，都通向同一个书架。
+- **浏览目录是零复制**：宿主自己 `readdir` 拿到真实路径，点「导入」就把原文件路径记进书架，不搬、不复制、不占第二份磁盘。只列一层、只显示 `.txt`（网文目录几千个文件，递归会卡死面板），带「上一层 / 主目录」跳转。
+- **选文件才存副本**：浏览器拿不到真实路径（`File.path` 早没了），所以这条路把字节传给宿主，宿主在 `%APPDATA%/novel-reader/imported/` 存一份带内容哈希的副本。同一个文件重复导入会命中原名，不会变成两本。
+- **移除即清副本**：从书架移除时，只有 `imported/` 下的副本会被删掉；**你原来那份文件永远不会被碰**。
+- **上传上限 100 MB**：网络小说 txt 十几兆很常见，配置通道那条 1 MiB 的限制对上传单独放宽，其余接口照旧。
+
 ## v0.2.0 新增 / What's new in v0.2.0
 
 这一版把「AI 陪读」做成了真正能用的东西，也修掉了几个用着难受的毛病：
@@ -23,7 +33,7 @@
 ## 功能 / Features
 
 - **右侧栏阅读**：作为 DSH 原生右栏标签打开，不开新窗口、不切应用，主界面继续留着你的项目，小说和干活同时进行。
-- **本地 txt 书架**：按绝对路径加入书架，插件只读取文件，不上传、不外发。
+- **本地 txt 书架**：三条路加书——选文件 / 浏览目录 / 手填绝对路径。选文件由宿主存一份副本；浏览与手填都是零复制，插件只读取原文件，不上传、不外发。
 - **自带三本书**：装上就有三本小说，首次打开右栏时自动装进书架，不用自己找文件、不用配置路径。想删就删，删了不会再回来。
 - **章节切分**：识别「第 N 章 / 节 / 回 / 卷 / 篇」标题；识别不到时按长度分段兜底。
 - **编码探测**：UTF-8 / UTF-8 BOM / UTF-16LE / UTF-16BE / GB18030 自动判定。
@@ -78,7 +88,10 @@ dsh plugin --profile desktop add file:<tgz 路径>
 1. **打开右栏**：点 DSH 界面右上角的右栏按钮，展开右侧列。
 2. **切到「小说书架」标签**：右栏顶部标签栏里选「小说书架」，进入书架页。
 3. **三本内置书已经在架**：第一次打开时，插件自带的三本小说会自动复制到本机数据目录并加进书架，点开就能读。
-4. **继续加书**：在输入框里填本地 txt 的**绝对路径**（例如 `D:\books\foo.txt`），按回车。书名会出现在列表里。
+4. **继续加书**：点工具栏的 **`+`** 打开导入面板，三条路随便挑——
+   - **选文件**：点「选文件」，或直接把 txt 拖进面板。浏览器只肯把字节交给网页，拿不到真实路径，所以这一条由宿主在 `%APPDATA%/novel-reader/imported/` 下落一份副本再记进书架（文件名带内容哈希前 16 位，同一个文件重复导入不会变成两本）。
+   - **浏览目录**：点「浏览目录」，宿主自己列目录（只列一层，只显示 `.txt`），点「导入」即加入书架，**零复制**，书架里记的就是原文件路径。网文目录动辄几千个文件，所以只列一层、不递归。
+   - **手填路径**：书架底部的输入框里填绝对路径（例如 `D:\books\foo.txt`），按回车。和「浏览目录」完全等价。
 5. **开始读**：点书名进入阅读页，当前章节正文直接显示在右栏里。
 6. **翻章与导航**：顶部「上一章 / 下一章」翻章，标题栏右侧的目录按钮展开章节列表，搜索框做全书全文检索（回车搜索，命中会给出章节名与上下文片段）。
 7. **调阅读体验**：底部滑块调字号，底部五个色板切换背景（白 / 护眼 / 米黄 / 深灰 / 纯黑）。
@@ -92,8 +105,8 @@ dsh plugin --profile desktop add file:<tgz 路径>
 
 理解这几步有助于自己改这个插件：
 
-1. **Host 半边（`lib/host.js`）** 在 `ctx.effect()` 里用 `ctx.webServer.register({kind:'prefix', path:'/novel-shelf/api'})` 挂一条前缀路由，对外提供 19 个方法：书架 `library.get` / `library.add` / `library.remove`，正文 `book.open` / `book.chapter` / `book.save` / `book.search`，设置 `settings.save`，模型 `model.options` / `model.save` / `model.reset` / `model.test`，陪读 `companion.get` / `companion.config` / `companion.tick` / `companion.nudge` / `companion.clear`，以及按会话记阅读页的 `reader.session.get` / `reader.session.set`。
-2. **每条请求先过信任栅栏**：`ctx.connection.requestRejection(req)` 判定是否来自可信的浏览器会话（命令行直连一律 403），再叠加 `Sec-Fetch-Site` 跨站拒绝；方法名用 `Object.hasOwn(api, method)` 做白名单，`Object.hasOwn` 防的是 `POST /novel-shelf/api/constructor` 这类原型成员命中；请求体上限 1 MiB。
+1. **Host 半边（`lib/host.js`）** 在 `ctx.effect()` 里用 `ctx.webServer.register({kind:'prefix', path:'/novel-shelf/api'})` 挂一条前缀路由，对外提供 23 个方法：书架 `library.get` / `library.add` / `library.scan` / `library.upload` / `library.remove`，正文 `book.open` / `book.chapter` / `book.save` / `book.search`，设置 `settings.save`，模型 `model.options` / `model.save` / `model.reset` / `model.test`，陪读 `companion.get` / `companion.config` / `companion.tick` / `companion.nudge` / `companion.clear`，诊断 `client.log`，以及按会话记阅读页的 `reader.session.get` / `reader.session.set`。
+2. **每条请求先过信任栅栏**：`ctx.connection.requestRejection(req)` 判定是否来自可信的浏览器会话（命令行直连一律 403），再叠加 `Sec-Fetch-Site` 跨站拒绝；方法名用 `Object.hasOwn(api, method)` 做白名单，`Object.hasOwn` 防的是 `POST /novel-shelf/api/constructor` 这类原型成员命中；请求体上限 1 MiB，只有 `library.upload` 单独放宽到 100 MiB（base64 会膨胀 4/3，上限按同样的比例算）。
 3. **Host 半边做真正的 IO**：读盘、编码探测、章节切分、全文检索、JSON 落盘（写临时文件再 rename；读到损坏 JSON 先备份成 `*.corrupt-<时间戳>` 再回退，不静默覆盖）。路径一律 `path.resolve` 归一。
 4. **Client 半边（`lib/client.js`）** 通过 `window.__ModuleLoader__.load({id:'dsh-novel-shelf', factory})` 挂载。它先 `ctx.inject(['sidebarRight','sidebarRightTabs'], ...)` 拿到右栏标签注册表，注册一个 tab 类型（`id = dsh-novel-shelf/reader`，`kind = dsh-novel-shelf:reader`），再通过 `ctx.slots.inject('sidebar.right.pane.tab', ...)` 占用两个 keyed 座位（正文与标题）。
 5. **座位注入回调必须返回清理函数**，否则宿主不会真正占位，面板会退化成宿主占位文案「这类内容还没有可用的查看方式」。这是 DSH 右栏插件最容易踩的坑。
@@ -106,6 +119,7 @@ dsh plugin --profile desktop add file:<tgz 路径>
 | --- | --- |
 | `%APPDATA%/novel-reader/books.json` | 书架（路径、名称、大小、加入时间） |
 | `%APPDATA%/novel-reader/books/` | 内置三本书的本机副本（首次打开书架时从 bundle 复制过来） |
+| `%APPDATA%/novel-reader/imported/` | 通过「选文件 / 拖进来」导入的书所存下的副本；把书从书架移除时，这里的副本一起删掉，**你原来那份文件不会被碰** |
 | `%APPDATA%/novel-reader/removed-bundled.json` | 你主动删掉的内置书名，删过就不会再自动装回来 |
 | `%APPDATA%/novel-reader/settings.json` | 主题、字号、行距、最后阅读的书 |
 | `%APPDATA%/novel-reader/annotations/<id>.json` | 每本书的批注与阅读进度 |

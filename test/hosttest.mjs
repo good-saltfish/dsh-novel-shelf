@@ -622,3 +622,137 @@ assert.ok(
   '报错必须带出模型的真实原因，实际：' + String(failedTest.json.error && failedTest.json.error.message),
 );
 failingLlm.stream = savedStream;
+
+/* -------------------------------------------------------------------------- */
+/* 导入书籍                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/* 目录浏览：列子目录 + txt，点中的每一项都是真路径 */
+{
+  const scanRoot = path.join(sandbox, 'scan-root');
+  const subDir = path.join(scanRoot, '子目录');
+  await fs.mkdir(subDir, { recursive: true });
+  await fs.writeFile(path.join(scanRoot, 'a.txt'), '第一章 起\n正文甲。\n', 'utf8');
+  await fs.writeFile(path.join(scanRoot, 'b.txt'), '第二章 起\n正文乙。\n', 'utf8');
+  await fs.writeFile(path.join(scanRoot, 'c.md'), '# 不是 txt', 'utf8');
+  await fs.writeFile(path.join(subDir, 'd.txt'), '第三章 起\n正文丙。\n', 'utf8');
+
+  const listed = await ok('library.scan', { dir: scanRoot });
+  assert.equal(listed.path, scanRoot, 'scan 要回报实际目录');
+  assert.deepEqual(
+    listed.entries.map((e) => e.name).sort(), ['a.txt', 'b.txt'],
+    'scan 只列 .txt，不列 .md，实际：' + JSON.stringify(listed.entries.map((e) => e.name)),
+  );
+  assert.deepEqual(
+    listed.dirs.map((d) => d.name), ['子目录'],
+    'scan 要列出子目录',
+  );
+  assert.ok(listed.entries.every((e) => e.size > 0), 'scan 要带回文件大小');
+  assert.ok(listed.entries.every((e) => path.isAbsolute(e.path)), 'scan 的每一项必须是绝对路径');
+
+  /* 空 dir 回落到主目录，不报错 */
+  const home = await ok('library.scan', {});
+  assert.equal(home.path, os.homedir(), '不传 dir 应回落到主目录');
+
+  /* 不存在的目录：明确 404，而不是空列表骗人 */
+  const missing = await post('library.scan', { dir: path.join(sandbox, 'no-such-dir') });
+  assert.equal(missing.json.error && missing.json.error.code, 'not-found', '不存在的目录要报 not-found');
+
+  /* 指向一个文件而不是目录：400 */
+  const notDir = await post('library.scan', { dir: path.join(scanRoot, 'a.txt') });
+  assert.equal(notDir.json.error && notDir.json.error.code, 'bad-request', '传文件路径要报 bad-request');
+
+  /* 列出之后直接导入其中一项：零复制，路径就是原文件 */
+  const picked = listed.entries.find((e) => e.name === 'a.txt');
+  const imported = await ok('library.add', { path: picked.path });
+  assert.equal(imported.added, true, '从目录里导入应成功');
+  const added = imported.books.find((b) => b.path === picked.path);
+  assert.ok(added, '导入后书架里必须有这条');
+  assert.equal(added.path, picked.path, '目录导入不得复制文件，路径必须原样');
+}
+
+/* 上传导入：浏览器拿不到路径，宿主落副本 */
+{
+  const shelfBefore = (await ok('library.get')).books;
+  /* 三个章节标记：splitChapters 少于 3 个会退回按段落切（既有设计），
+     那样测不出「上传的书能不能正常切章」，所以这里按真实网文的形状写。 */
+  const text = [
+    '书名：上传的书', '作者：某人', '',
+    '第一章 上传第一章', '上传正文一。', '',
+    '第二章 上传第二章', '上传正文二。', '',
+    '第三章 上传第三章', '上传正文三。', '',
+  ].join('\n');
+  const data = Buffer.from(text, 'utf8').toString('base64');
+
+  const first = await ok('library.upload', { name: '上传的书.txt', data });
+  assert.equal(first.added, true, '上传应成功加入书架');
+  assert.ok(first.path.startsWith(path.join(dataDir, 'imported') + path.sep),
+    '上传的副本必须落在 imported/ 下，实际：' + first.path);
+  assert.ok(await fileExists(first.path), '副本必须真的落盘');
+  const onDisk = await fs.readFile(first.path, 'utf8');
+  assert.equal(onDisk, text, '落盘内容必须与上传的一致');
+  const book = first.books.find((b) => b.path === first.path);
+  assert.equal(book.name, '上传的书', '书名取文件名去掉扩展名');
+
+  /* 副本必须真的能读（章节切分走的是同一条 loadBook）。
+     4 = 简介块 + 3 章：书头「书名/作者」在第一个章节标记之前，
+     splitChapters 会把那段非空前缀单独切成「书籍信息 · 简介」。 */
+  const opened = await ok('book.open', { path: first.path });
+  assert.equal(opened.chapters.length, 4, '上传的书要能正常切章（简介 + 3 章）');
+
+  /* 幂等：同一份字节再传一次，不得在书架里多一条 */
+  const again = await ok('library.upload', { name: '上传的书.txt', data });
+  assert.equal(again.added, false, '同内容重复上传不得重复入库');
+  assert.equal(again.books.length, first.books.length, '重复上传后书架长度不得变化');
+  assert.equal(again.path, first.path, '同内容必须落到同一个副本文件');
+
+  /* 同名但内容不同：是两本书，都要在 */
+  const other = await ok('library.upload', {
+    name: '上传的书.txt',
+    data: Buffer.from('第一章 另一本\n不一样的内容。\n', 'utf8').toString('base64'),
+  });
+  assert.equal(other.added, true, '内容不同就是另一本书');
+  assert.notEqual(other.path, first.path, '不同内容必须落不同副本');
+
+  /* 只收 txt */
+  const badExt = await post('library.upload', { name: 'x.epub', data });
+  assert.equal(badExt.json.error && badExt.json.error.code, 'bad-request', '非 txt 必须拒绝');
+
+  /* 空文件与空数据：
+     - data 为空串 → 参数缺失（base64 里「空」只能是空串）；
+     - data 是空白但解码后零字节 → 才算「文件是空的」。
+     两条是不同分支，都要挡住。 */
+  const emptyBytes = await post('library.upload', { name: 'empty.txt', data: '' });
+  assert.equal(emptyBytes.json.error && emptyBytes.json.error.code, 'bad-request', '空 data 必须拒绝');
+  const zero = await post('library.upload', { name: 'zero.txt', data: '   ' });
+  assert.equal(zero.json.error && zero.json.error.code, 'empty-file', '零字节文件必须拒绝');
+
+  /* 超过上限：按 base64 长度先挡，不解码 */
+  const huge = 'A'.repeat(Math.ceil(100 * 1024 * 1024 * 4 / 3) + 4096);
+  const tooBig = await post('library.upload', { name: 'huge.txt', data: huge });
+  assert.equal(tooBig.json.error && tooBig.json.error.code, 'too-large', '超大文件必须报 too-large');
+
+  /* 移除上传的书：副本要跟着删，用户原文件不动 */
+  const removeMe = first.books.find((b) => b.path === first.path);
+  await ok('library.remove', { id: removeMe.id });
+  assert.equal(await fileExists(first.path), false, '移除上传的书要清掉宿主落的副本');
+}
+
+/* 手填路径导入：不存在的文件要报 not-found，空文件要报 empty-file */
+{
+  const missing = await post('library.add', { path: path.join(sandbox, '没这个文件.txt') });
+  assert.equal(missing.json.error && missing.json.error.code, 'not-found', '不存在的文件要报 not-found');
+
+  const emptyPath = path.join(sandbox, '空的.txt');
+  await fs.writeFile(emptyPath, '', 'utf8');
+  const empty = await post('library.add', { path: emptyPath });
+  assert.equal(empty.json.error && empty.json.error.code, 'empty-file', '空文件要报 empty-file');
+
+  /* 重复添加同一路径：added=false，但书架不重复 */
+  await fs.writeFile(emptyPath, '第一章 有内容了\n正文。\n', 'utf8');
+  const once = await ok('library.add', { path: emptyPath });
+  assert.equal(once.added, true);
+  const twice = await ok('library.add', { path: emptyPath });
+  assert.equal(twice.added, false, '同一路径重复添加必须报 added=false');
+  assert.equal(twice.books.length, once.books.length, '重复添加不得增加条目');
+}

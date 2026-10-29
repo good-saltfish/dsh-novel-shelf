@@ -10,6 +10,16 @@
 
 ![The whole DSH window with the "小说书架 / Novel Shelf" tab open in the right sidebar](docs/screenshot-full.png)
 
+## What's new in v0.3.0
+
+This release fills in what the shelf was missing most: **you can bring your own books in**, without first digging an absolute path out of a file manager.
+
+- **Three import routes**: the `+` button in the toolbar opens the import panel — **pick a file** (or drag a txt onto it), **browse folders**, **type a path** — all landing in the same shelf.
+- **Browsing is zero-copy**: the host does its own `readdir` and gets the real path, so clicking "Import" records that path in the shelf — nothing is moved, copied, or duplicated on disk. One level only, `.txt` only (web-novel folders hold thousands of files; recursing would stall the panel), with "up one level" and "home" navigation.
+- **Only file-picking stores a copy**: the browser cannot hand a page a real path any more (`File.path` is long gone), so this route sends the bytes to the host, which stores a copy under `%APPDATA%/novel-reader/imported/` whose name carries the content hash. Importing the same file twice hits the same name instead of creating a second book.
+- **Removing a book cleans up its copy**: removing from the shelf deletes only copies under `imported/`; **the original file you picked is never touched**.
+- **Uploads up to 100 MB**: novel txt files are routinely tens of megabytes, so the upload route gets its own limit instead of the 1 MiB one the config routes use; every other endpoint stays as it was.
+
 ## What's new in v0.2.0
 
 This release turns the AI reading companion into something you actually use, and fixes a few things that got in the way:
@@ -24,7 +34,7 @@ This release turns the AI reading companion into something you actually use, and
 ## Features
 
 - **Right-sidebar reading**: opens as a native DSH right-sidebar tab — no new window, no app switch. Your project stays on screen while the novel rides along.
-- **Local txt shelf**: add books by absolute path; the plugin only reads files, never uploads them.
+- **Local txt shelf**: three ways to add a book — pick a file, browse folders, or type an absolute path. Picking a file has the host store a copy; browsing and typing are zero-copy and read your original file in place. The plugin never uploads anything.
 - **Three books built in**: three novels land on the shelf automatically the first time you open the sidebar — no file hunting, no path config. Remove them if you want; they stay removed.
 - **Chapter splitting**: recognises `第 N 章 / 节 / 回 / 卷 / 篇` headings, with a length-based fallback.
 - **Encoding detection**: UTF-8 / UTF-8 BOM / UTF-16LE / UTF-16BE / GB18030.
@@ -79,7 +89,10 @@ dsh plugin --profile desktop add file:<tgz path>
 1. **Open the right sidebar**: click the right-column button in the top-right of the DSH window.
 2. **Pick the "小说书架" tab**: choose it in the tab bar at the top of the right sidebar to reach the shelf.
 3. **Three books are already there**: on the first open the three bundled novels are copied out of the plugin and added to the shelf automatically. Click one to start reading right away.
-4. **Add more books**: type the **absolute path** of a local txt file (e.g. `D:\books\foo.txt`) in the input box and press Enter. The title shows up in the list.
+4. **Add more books**: hit the **`+`** button in the toolbar and pick one of three routes —
+   - **Pick a file**: click "Pick file", or just drop a txt onto the panel. The browser only hands the page bytes (it stopped exposing real paths long ago), so this route has the host store a copy under `%APPDATA%/novel-reader/imported/` and register that. The copy carries the first 16 hex digits of the content hash in its name, so importing the same file twice will not create a second book.
+   - **Browse folders**: click "Browse folders"; the host lists the directory itself (one level, `.txt` only) and clicking "Import" adds the real path with **zero copying**. Web-novel folders often hold thousands of files, hence one level and no recursion.
+   - **Type a path**: enter an absolute path in the shelf's bottom input (e.g. `D:\books\foo.txt`) and press Enter — exactly equivalent to browsing.
 5. **Start reading**: click a title — the chapter text appears directly in the right sidebar.
 6. **Navigate**: "上一章 / 下一章" switch chapters, the catalogue button next to the title opens the chapter list, and the search box runs a full-text search over the book (press Enter; a hit reports the chapter name plus a context snippet).
 7. **Tune the page**: the bottom slider changes the font size, the five swatches switch the background (white / eye-care / sepia / dark grey / pure black).
@@ -107,6 +120,7 @@ Useful background if you want to modify the plugin yourself:
 | --- | --- |
 | `%APPDATA%/novel-reader/books.json` | Shelf (path, name, size, added time) |
 | `%APPDATA%/novel-reader/books/` | Local copies of the three bundled books (copied out of the bundle on first shelf read) |
+| `%APPDATA%/novel-reader/imported/` | Copies of books added via "Pick file" / drag-and-drop; removing such a book from the shelf deletes its copy here — **your original file is never touched** |
 | `%APPDATA%/novel-reader/removed-bundled.json` | Titles of bundled books you removed — they are never auto-installed again |
 | `%APPDATA%/novel-reader/settings.json` | Theme, font size, line height, last read book |
 | `%APPDATA%/novel-reader/annotations/<id>.json` | Highlights and reading progress per book |
