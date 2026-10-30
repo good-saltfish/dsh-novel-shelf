@@ -58,7 +58,10 @@ globalThis.fetch = async (url, init) => {
   }
   if (method === 'companion.clear') companionState.lines = [];
   const entry = RESPONSES[method];
-  const value = entry && entry.byIndex ? entry.byIndex(body.index || 0) : (entry ? entry.value : undefined);
+  /* byBody 给需要看请求体的桩用（library.scan 要看 dir，library.add 要看 path） */
+  const value = entry && entry.byBody
+    ? entry.byBody(body)
+    : (entry && entry.byIndex ? entry.byIndex(body.index || 0) : (entry ? entry.value : undefined));
   const text = JSON.stringify(entry && entry.ok === false
     ? { ok: false, error: { code: 'e', message: entry.message } }
     : { ok: true, value: value || {} });
@@ -82,6 +85,50 @@ const RESPONSES = {
   'book.save': { value: { saved: true } },
   'book.search': { value: { results: [], total: 0 } },
   'settings.save': { value: {} },
+  /* 导入三条路要用的桩。library.scan 按 dir 分档返回：
+     无参 = 主目录（一个子目录、没有 txt），带 novels 路径 = 两个 txt。
+     让「进子目录 / 上一层 / 主目录 / 列出 txt / 导入」都真跑一遍。 */
+  'library.scan': {
+    byBody: (body) => {
+      const dir = String(body.dir || '');
+      if (dir.endsWith('novels')) {
+        return {
+          path: 'C:\\Users\\me\\novels',
+          parent: 'C:\\Users\\me',
+          home: 'C:\\Users\\me',
+          dirs: [],
+          entries: [
+            { name: '甲.txt', path: 'C:\\Users\\me\\novels\\甲.txt', size: 2048 },
+            { name: '乙.txt', path: 'C:\\Users\\me\\novels\\乙.txt', size: 3145728 },
+          ],
+        };
+      }
+      return {
+        path: 'C:\\Users\\me',
+        parent: 'C:\\',
+        home: 'C:\\Users\\me',
+        dirs: [{ name: 'novels', path: 'C:\\Users\\me\\novels' }],
+        entries: [],
+      };
+    },
+  },
+  'library.upload': {
+    byBody: (body) => ({
+      added: !String(body.name || '').includes('dup'),
+      path: 'C:\\Users\\me\\AppData\\Roaming\\novel-reader\\imported\\abc-' + String(body.name || 'x.txt'),
+      books: [{ id: 'up1', name: String(body.name || 'x.txt'), path: 'C:/up.txt', size: 100 }],
+    }),
+  },
+  'library.add': {
+    byBody: (body) => ({
+      added: !String(body.path || '').includes('dup'),
+      path: body.path,
+      books: [{ id: 'add1', name: '按路径加的书', path: body.path, size: 100 }],
+    }),
+  },
+  'library.remove': { value: { books: [] } },
+  'reader.session.get': { value: {} },
+  'reader.session.set': { value: {} },
   'companion.get': { get value() { return { ...companionState }; } },
   'companion.config': { value: {} },
   'companion.nudge': { value: {} },
@@ -445,6 +492,148 @@ assert.equal(saved[0].body.theme, 'black');
 
 /* 设置成功后刷新一次：主题应从 Host 读回（此处 Host 回 sepia 是桩的固定值，
    所以只验证请求发出与本地状态即时生效，不断言回读） */
+
+/* --------------------------------------------------------------- 导入书籍 */
+
+/* v0.3.0 的主功能：三条路加书。这段之前 smoke 一次都没点过导入面板。 */
+
+requests.length = 0;
+const plusBtn = findAll(tree, 'nr-btn').find((b) => b.props.title === '导入书籍');
+assert.ok(plusBtn, '书架工具栏必须有「导入书籍」按钮');
+plusBtn.props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+
+/* --- 路 1：主视图（拖拽 + 选文件 + 浏览目录按钮） --- */
+const card = findAll(tree, 'nr-import-card')[0];
+assert.ok(card, '点「导入书籍」必须渲染导入卡片');
+assert.ok(findAll(tree, 'nr-drop')[0], '主视图必须有拖拽区');
+/* 拖拽事件挂在卡片上（nr-drop 是卡片内的视觉区块，事件从它冒泡上来） */
+assert.equal(typeof card.props.onDragOver, 'function', '卡片必须接 onDragOver');
+assert.equal(typeof card.props.onDrop, 'function', '卡片必须接 onDrop');
+assert.equal(typeof card.props.onDragLeave, 'function', '卡片必须接 onDragLeave');
+const fileInput = findAll(tree, 'nr-file-input')[0];
+assert.ok(fileInput, '主视图必须有 file input');
+assert.equal(fileInput.props.type, 'file');
+assert.equal(fileInput.props.multiple, true, '必须允许多选');
+assert.ok(String(fileInput.props.accept).includes('.txt'), 'file input 必须限定 .txt');
+
+/* --- 选文件（点「选文件」→ 隐藏 input 的 onChange）也是走 library.upload --- */
+requests.length = 0;
+const pickTarget = { value: 'C:\\fakepath\\选进来的.txt' };
+await fileInput.props.onChange({
+  target: { files: [{ name: '选进来的.txt', size: 4096, arrayBuffer: async () => new ArrayBuffer(4096) }], ...pickTarget },
+});
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+const pickReq = requests.find((r) => r.method === 'library.upload');
+assert.ok(pickReq, '选文件必须调 library.upload');
+assert.equal(pickReq.body.name, '选进来的.txt');
+assert.equal(findAll(tree, 'nr-import-card').length, 0, '选文件导入成功后应回到书架');
+
+/* 多选：两个 txt 必须串行各发一次 */
+requests.length = 0;
+findAll(tree, 'nr-btn').find((b) => b.props.title === '导入书籍').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+await findAll(tree, 'nr-file-input')[0].props.onChange({
+  target: { files: [
+    { name: '一.txt', size: 10, arrayBuffer: async () => new ArrayBuffer(10) },
+    { name: '二.txt', size: 20, arrayBuffer: async () => new ArrayBuffer(20) },
+  ], value: '' },
+});
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+const multi = requests.filter((r) => r.method === 'library.upload');
+assert.equal(multi.length, 2, '多选两个 txt 必须各发一次上传');
+assert.deepEqual(multi.map((r) => r.body.name), ['一.txt', '二.txt'], '必须按选择顺序串行上传');
+
+/* 重新打开面板，后面的拖拽用例从这里接着走 */
+requests.length = 0;
+findAll(tree, 'nr-btn').find((b) => b.props.title === '导入书籍').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+
+/* 拖进一个 txt：走 library.upload，成功后回书架 */
+requests.length = 0;
+await card.props.onDrop({
+  preventDefault() {},
+  dataTransfer: { files: [{ name: '拖进来的.txt', size: 1024, arrayBuffer: async () => new ArrayBuffer(1024) }] },
+});
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+const upReq = requests.find((r) => r.method === 'library.upload');
+assert.ok(upReq, '拖入 txt 必须调 library.upload');
+assert.equal(upReq.body.name, '拖进来的.txt');
+assert.ok(typeof upReq.body.data === 'string' && upReq.body.data.length > 0, 'upload 必须带 base64 数据');
+assert.equal(findAll(tree, 'nr-import-card').length, 0, '导入成功后应回到书架');
+
+/* 非 txt 与空文件在客户端就拦掉，不许发请求 */
+requests.length = 0;
+findAll(tree, 'nr-btn').find((b) => b.props.title === '导入书籍').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+await findAll(tree, 'nr-import-card')[0].props.onDrop({
+  preventDefault() {},
+  dataTransfer: { files: [
+    { name: '不是文本.md', size: 10, arrayBuffer: async () => new ArrayBuffer(10) },
+    { name: '空的.txt', size: 0, arrayBuffer: async () => new ArrayBuffer(0) },
+  ] },
+});
+await flush();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.equal(requests.filter((r) => r.method === 'library.upload').length, 0, '非 txt / 空文件不得发上传请求');
+assert.ok(findAll(tree, 'nr-error').length >= 1, '客户端拦截要给提示');
+
+/* --- 路 2：浏览目录 --- */
+requests.length = 0;
+findAll(tree, 'nr-btn').find((b) => b.props.children === '浏览目录').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+const scanReq = requests.find((r) => r.method === 'library.scan');
+assert.ok(scanReq, '点「浏览目录」必须调 library.scan');
+assert.equal(scanReq.body.dir, '', '首次浏览应不传 dir（宿主回落主目录）');
+assert.equal(findAll(tree, 'nr-brow-dir').length, 1, '主目录下应有一个子目录按钮');
+assert.equal(findAll(tree, 'nr-brow-files').length, 0, '主目录没有 txt 时不该有文件列表');
+
+/* 进子目录 → 列出两个 txt */
+requests.length = 0;
+findAll(tree, 'nr-brow-dir')[0].props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.equal(requests.find((r) => r.method === 'library.scan').body.dir, 'C:\\Users\\me\\novels', '点子目录要把该目录传上去');
+const rows = findAll(tree, 'nr-brow-file');
+assert.equal(rows.length, 2, '子目录里应有两条 txt');
+assert.ok(rows[0].props.children[0].props.children.includes('甲'), '要显示文件名');
+assert.ok(rows[0].props.children[1].props.children.includes('KB'), '要显示大小');
+
+/* 导入其中一本：零复制，走 library.add(path) */
+requests.length = 0;
+const importBtns = findAll(tree, 'nr-btn').filter((b) => b.props.children === '导入');
+assert.equal(importBtns.length, 2, '每个 txt 都要有「导入」按钮');
+importBtns[0].props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+const addReq = requests.find((r) => r.method === 'library.add');
+assert.ok(addReq, '浏览目录导入必须调 library.add（零复制）');
+assert.equal(addReq.body.path, 'C:\\Users\\me\\novels\\甲.txt', '必须传宿主给的绝对路径');
+assert.ok(!requests.some((r) => r.method === 'library.upload'), '浏览导入不得上传字节');
+
+/* 「上一层」「主目录」都要真发请求 */
+requests.length = 0;
+findAll(tree, 'nr-btn').find((b) => b.props.children === '上一层').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.ok(requests.some((r) => r.method === 'library.scan' && r.body.dir === 'C:\\Users\\me'), '「上一层」要扫父目录');
+requests.length = 0;
+findAll(tree, 'nr-btn').find((b) => b.props.children === '主目录').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.ok(requests.some((r) => r.method === 'library.scan' && r.body.dir === ''), '「主目录」要重扫主目录');
+
+/* scan 失败要在面板里显示，不许把书架带崩 */
+requests.length = 0;
+const scanOriginal = RESPONSES['library.scan'];
+RESPONSES['library.scan'] = { ok: false, message: '目录不存在：X' };
+findAll(tree, 'nr-brow-dir')[0].props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.ok(findAll(tree, 'nr-error').length >= 1, 'scan 失败必须在面板内显示错误');
+assert.equal(findAll(tree, 'nr-import-card').length, 1, 'scan 失败后导入面板仍在');
+RESPONSES['library.scan'] = scanOriginal;
+
+/* 关掉导入面板 → 回到书架 */
+findAll(tree, 'nr-btn').find((b) => b.props.title === '关闭').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.equal(findAll(tree, 'nr-import-card').length, 0, '关闭后导入面板应消失');
+console.log('✔ 导入书籍三条路全部走通: 拖拽上传 / 浏览目录零复制 / 客户端拦截 / scan 失败提示');
 
 /* 打开一本书：主题在阅读页不得丢 */
 requests.length = 0;
