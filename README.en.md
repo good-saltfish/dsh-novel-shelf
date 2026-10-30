@@ -15,7 +15,7 @@
 This release fixes the most fundamental problem: **readers should not have to hunt for books themselves**.
 
 - **A built-in public-domain Chinese library, 434 titles**: the shelf toolbar gains a library button. Open it and you get a catalogue — *Journey to the West*, *Dream of the Red Chamber*, *Romance of the Three Kingdoms*, *Water Margin*, *Investiture of the Gods*, *Strange Tales from a Chinese Studio*, *The Scholars*, *The Travels of Lao Can* are all in there. Search by title or author, hit "Download", and the book lands on your shelf ready to read. No txt hunting, no paths, no book-source config.
-- **Sourced from Project Gutenberg's Chinese collection**: every author has been dead for over 50 years, so the text is in the public domain and downloading and reading it is legal. The plugin ships only the **catalogue** (a 44 KB JSON); the text is fetched from a CDN when you click download, so it costs nothing in package size.
+- **Sourced from Project Gutenberg's Chinese collection**: the plugin ships only the **catalogue** (a 44 KB JSON); the text is fetched from a CDN when you click download, so it costs nothing in package size.
 - **Download lands straight on the shelf**: stored under `%APPDATA%/novel-reader/public-domain/` and fully readable offline afterwards; downloading the same book twice does not create a duplicate.
 - **Four CDNs with automatic fallback**: `cdn.jsdelivr.net` → `gcore` → `testingcf` → `fastly`, whichever answers.
 - **Gutenberg's header and footer are stripped automatically**: the licence blurb, the `Produced by` line, the `*** START/END OF THE PROJECT GUTENBERG EBOOK ***` markers and the file-naming note all go away, so the book opens at chapter one. Measured on *Journey to the West*: 2.24 MB, 90 chapters, about one second to download.
@@ -45,7 +45,7 @@ This release turns the AI reading companion into something you actually use, and
 
 - **Right-sidebar reading**: opens as a native DSH right-sidebar tab — no new window, no app switch. Your project stays on screen while the novel rides along.
 - **Local txt shelf**: three ways to add a book — pick a file, browse folders, or type an absolute path. Picking a file has the host store a copy; browsing and typing are zero-copy and read your original file in place. The plugin never uploads anything.
-- **Built-in public-domain library (434 titles)**: the catalogue ships with the plugin; the text is fetched only when you click download, and is fully offline afterwards. Every title is a public-domain work whose author died more than 50 years ago, sourced from Project Gutenberg. See [how the public-domain library works](#how-the-public-domain-library-works).
+- **Built-in public-domain library (434 titles)**: the catalogue ships with the plugin; the text is fetched only when you click download, and is fully offline afterwards. Sourced from Project Gutenberg. See [how the public-domain library works](#how-the-public-domain-library-works).
 - **Three books built in**: three novels land on the shelf automatically the first time you open the sidebar — no file hunting, no path config. Remove them if you want; they stay removed.
 - **Chapter splitting**: recognises `第 N 章 / 节 / 回 / 卷 / 篇` headings, with a length-based fallback.
 - **Encoding detection**: UTF-8 / UTF-8 BOM / UTF-16LE / UTF-16BE / GB18030.
@@ -79,8 +79,6 @@ Behind the library button in the shelf toolbar is `catalog/zh.json` — **a cata
 **Why GITenberg**: the official Project Gutenberg site and the usual mirrors are unreachable on some networks, while GITenberg is its GitHub mirror organisation, so jsDelivr's CDN can serve the files. Repo names are built by replacing every non-alphanumeric character in the title with one `-`; titles with subtitles miss that rule, so catalogue generation falls back to a GitHub search (345 of 434 resolved by rule, 89 by search). The generation approach is documented under `docs/`; it does not run at runtime.
 
 **Why a catalogue and not the texts**: the 434 texts come to roughly 900 MB — too big to ship and pointless, since most people read a handful of them.
-
-**Licensing**: all titles are public-domain works (author dead more than 50 years). The plugin itself is MIT and claims no rights over that text.
 
 ## Install
 
