@@ -34,6 +34,10 @@ for (const name of BUNDLED_NAMES) {
   ].join('\n'), 'utf8');
 }
 process.env.NOVEL_SHELF_BOOKS_DIR = bundleBooks;
+/* 公版书目也指到沙箱里的一份小目录：模块级 catalogCache 只读一次，
+ * 必须在 import 之前就把路径准备好，否则将来某个测试先调 catalog.*
+ * 会把真实随包的 434 本读进缓存，换目录就不再生效。 */
+process.env.NOVEL_SHELF_CATALOG = path.join(sandbox, 'catalog-test.json');
 
 const mod = await import('../lib/host.js');
 
@@ -756,3 +760,167 @@ failingLlm.stream = savedStream;
   assert.equal(twice.added, false, '同一路径重复添加必须报 added=false');
   assert.equal(twice.books.length, once.books.length, '重复添加不得增加条目');
 }
+
+/* -------------------------------------------------------------------------- */
+/* 公版书库：目录读取 / 下载入库 / 页眉页脚剥除 / CDN 回退                      */
+/* -------------------------------------------------------------------------- */
+
+{
+  /* 用一份小目录替代真实 434 本，避免单测依赖随包分发的静态文件内容。
+     （路径已在文件顶部设进 NOVEL_SHELF_CATALOG，必须在 import 之前。） */
+  const catalogPath = path.join(sandbox, 'catalog-test.json');
+  await fs.writeFile(catalogPath, JSON.stringify({
+    source: 'test-gutenberg',
+    books: [
+      { id: '23962', title: '西遊記', author: '吳承恩', downloads: 11629, repo: '---_23962' },
+      { id: '24264', title: '紅樓夢', author: '曹雪芹', downloads: 9312, repo: '---_24264' },
+    ],
+  }), 'utf8');
+
+  const listed = await ok('catalog.list', {});
+  assert.equal(listed.total, 2, '目录应有 2 本');
+  assert.equal(listed.source, 'test-gutenberg');
+  assert.equal(listed.books[0].title, '西遊記');
+  assert.equal(listed.books[0].inShelf, false, '还没下载，不能在书架');
+
+  /* 搜索命中 / 未命中 */
+  const hit = await ok('catalog.list', { query: '紅樓' });
+  assert.equal(hit.books.length, 1, '按书名搜索要命中 1 本');
+  assert.equal(hit.books[0].title, '紅樓夢');
+  const byAuthor = await ok('catalog.list', { query: '吳承恩' });
+  assert.equal(byAuthor.books.length, 1, '按作者搜索也要命中');
+  const miss = await ok('catalog.list', { query: '不存在的书名' });
+  assert.equal(miss.books.length, 0, '搜不到就该是空列表');
+
+  /* 非法 id / 目录里没有的 id */
+  const badId = await post('catalog.download', { id: 'abc' });
+  assert.equal(badId.json.error && badId.json.error.code, 'bad-request', 'id 必须纯数字');
+  const noSuch = await post('catalog.download', { id: '99999' });
+  assert.equal(noSuch.json.error && noSuch.json.error.code, 'not-found', '目录外的 id 要报 not-found');
+
+  /* 下载：桩掉全局 fetch，第一本返回带 Gutenberg 页眉页脚的正文。
+     第二个 CDN 才成功之前的第一个要失败一次，验证回退顺序。 */
+  const realFetch = globalThis.fetch;
+  const bodies = [
+    '*** START OF THE PROJECT GUTENBERG EBOOK 西遊記 ***\n\n第一回 靈根育孕\n正文一。\n第',
+  ];
+  let calls = 0;
+  globalThis.fetch = async (url) => {
+    calls += 1;
+    if (calls === 1) throw new Error('connect timeout');       // 第一个镜像故意失败
+    if (calls === 2) return { ok: false, status: 503 };        // 第二个返回 503
+    return {
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => new TextEncoder().encode([
+        '*** START OF THE PROJECT GUTENBERG EBOOK 西遊記 ***',
+        '',
+        '第一回　靈根育孕源流出',
+        '詩曰：混沌未分天地亂。',
+        '',
+        '第二回　悟徹菩提真妙理',
+        '正文二。',
+        '',
+        '第三回　四海千山皆拱伏',
+        '正文三。',
+        '',
+        '*** END OF THE PROJECT GUTENBERG EBOOK 西遊記 ***',
+        '',
+        'Produced by someone.',
+      ].join('\n')).buffer,
+    };
+  };
+  try {
+    const got = await ok('catalog.download', { id: '23962' });
+    assert.equal(got.added, true, '下载后应加入书架');
+    assert.equal(got.title, '西遊記');
+    assert.ok(calls >= 3, '前两个镜像失败后应继续回退，实际调用 ' + calls + ' 次');
+    assert.equal(await fileExists(got.path), true, '正文要落盘');
+
+    /* 正文必须已剥掉页眉页脚，且章节可切 */
+    const raw = await fs.readFile(got.path, 'utf8');
+    assert.equal(/\*\*\*\s*START OF/.test(raw), false, '页眉必须剥掉');
+    assert.equal(/\*\*\*\s*END OF/.test(raw), false, '页脚必须剥掉');
+    assert.equal(/Produced by someone/.test(raw), false, '页脚后的制作信息也要剥掉');
+    assert.equal(raw.startsWith('第一回'), true, '正文要从第一回开始，实际开头：' + JSON.stringify(raw.slice(0, 12)));
+
+    const opened = await ok('book.open', { path: got.path });
+    assert.equal(opened.chapters.length, 3, '应切出 3 章，实际 ' + opened.chapters.length);
+    assert.ok(opened.chapters[0].title.includes('第一回'), '首章标题应含第一回');
+
+    /* 已在书架：catalog.list 要标 inShelf，重复下载不新增条目 */
+    const after = await ok('catalog.list', { query: '西遊' });
+    assert.equal(after.books[0].inShelf, true, '下载过的书要标成已在书架');
+    const again = await ok('catalog.download', { id: '23962' });
+    assert.equal(again.added, false, '重复下载不得重复入架');
+    assert.equal(again.books.length, got.books.length, '重复下载不得增加条目');
+
+    /* 镜像全挂：要报 download-failed 并带上每个镜像的原因，不能静默成功 */
+    globalThis.fetch = async () => { throw new Error('ECONNRESET'); };
+    const failed = await post('catalog.download', { id: '24264' });
+    assert.equal(failed.json.error && failed.json.error.code, 'download-failed', '全镜像失败要报 download-failed');
+    assert.ok(/ECONNRESET/.test(failed.json.error.message), '错误里要带镜像失败原因，实际：' + failed.json.error.message);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  /* 真实 Gutenberg 文件的混合形态（照《西遊記》23962 的实测结构写的）：
+     开头是授权说明 + `The Project Gutenberg EBook of ...` 标题行，中间才是
+     `*** START OF ***`，紧跟一行 `Produced by ...`；结尾无星号的
+     `End of the Project Gutenberg EBook ...` 反而**在** `*** END OF ***`
+     之前。这四条都必须剥掉，正文要从「第一回」开始、到「至此終」结束。 */
+  const realFetch2 = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    arrayBuffer: async () => new TextEncoder().encode([
+      "The Project Gutenberg EBook of Journey to the West, by Cheng'en Wu",
+      '',
+      'This eBook is for the use of anyone anywhere at no cost and with',
+      'almost no restrictions whatsoever.',
+      're-use it under the terms of the Project Gutenberg License included',
+      'with this eBook or online at www.gutenberg.org',
+      '',
+      '*** START OF THE PROJECT GUTENBERG EBOOK JOURNEY TO THE WEST ***',
+      '',
+      'Produced by Leong Joana Kit Ieng',
+      '',
+      '',
+      '',
+      '',
+      '第一回     靈根育孕源流出　心性修持大道生',
+      '',
+      '　　詩曰：混沌未分天地亂。',
+      '',
+      '第二回     悟徹菩提真妙理',
+      '正文二。',
+      '',
+      '第三回     四海千山皆拱伏',
+      '正文三。',
+      '',
+      '    《西遊記》至此終。',
+      '',
+      '',
+      "End of the Project Gutenberg EBook of Journey to the West, by Cheng'en Wu",
+      '',
+      '*** END OF THIS PROJECT GUTENBERG EBOOK JOURNEY TO THE WEST ***',
+      '',
+      '***** This file should be named 23962-0.txt or 23962-0.zip *****',
+    ].join('\r\n')).buffer,
+  });
+  try {
+    const got = await ok('catalog.download', { id: '24264' });
+    const raw = await fs.readFile(got.path, 'utf8');
+    assert.equal(/Produced by/i.test(raw), false, '星号页眉后面的 Produced by 也要剥，实际开头：' + JSON.stringify(raw.slice(0, 40)));
+    assert.equal(/Project Gutenberg/i.test(raw), false, '任何 Gutenberg 字样都不该留在正文里');
+    assert.equal(/This eBook is for/i.test(raw), false, '授权说明要剥掉');
+    assert.equal(/This file should be named/i.test(raw), false, '文件命名说明要剥掉');
+    assert.equal(raw.replace(/^\s+/, '').startsWith('第一回'), true, '正文必须从第一回开始');
+    assert.ok(raw.trimEnd().endsWith('《西遊記》至此終。'), '正文必须收在「至此終」，实际结尾：' + JSON.stringify(raw.slice(-30)));
+    const opened = await ok('book.open', { path: got.path });
+    assert.equal(opened.chapters.length, 3, '剥干净后应切出 3 章，实际 ' + opened.chapters.length);
+  } finally {
+    globalThis.fetch = realFetch2;
+  }
+}
+

@@ -10,6 +10,16 @@
 
 ![The whole DSH window with the "小说书架 / Novel Shelf" tab open in the right sidebar](docs/screenshot-full.png)
 
+## What's new in v0.4.0
+
+This release fixes the most fundamental problem: **readers should not have to hunt for books themselves**.
+
+- **A built-in public-domain Chinese library, 434 titles**: the shelf toolbar gains a library button. Open it and you get a catalogue — *Journey to the West*, *Dream of the Red Chamber*, *Romance of the Three Kingdoms*, *Water Margin*, *Investiture of the Gods*, *Strange Tales from a Chinese Studio*, *The Scholars*, *The Travels of Lao Can* are all in there. Search by title or author, hit "Download", and the book lands on your shelf ready to read. No txt hunting, no paths, no book-source config.
+- **Sourced from Project Gutenberg's Chinese collection**: every author has been dead for over 50 years, so the text is in the public domain and downloading and reading it is legal. The plugin ships only the **catalogue** (a 44 KB JSON); the text is fetched from a CDN when you click download, so it costs nothing in package size.
+- **Download lands straight on the shelf**: stored under `%APPDATA%/novel-reader/public-domain/` and fully readable offline afterwards; downloading the same book twice does not create a duplicate.
+- **Four CDNs with automatic fallback**: `cdn.jsdelivr.net` → `gcore` → `testingcf` → `fastly`, whichever answers.
+- **Gutenberg's header and footer are stripped automatically**: the licence blurb, the `Produced by` line, the `*** START/END OF THE PROJECT GUTENBERG EBOOK ***` markers and the file-naming note all go away, so the book opens at chapter one. Measured on *Journey to the West*: 2.24 MB, 90 chapters, about one second to download.
+
 ## What's new in v0.3.0
 
 This release fills in what the shelf was missing most: **you can bring your own books in**, without first digging an absolute path out of a file manager.
@@ -35,6 +45,7 @@ This release turns the AI reading companion into something you actually use, and
 
 - **Right-sidebar reading**: opens as a native DSH right-sidebar tab — no new window, no app switch. Your project stays on screen while the novel rides along.
 - **Local txt shelf**: three ways to add a book — pick a file, browse folders, or type an absolute path. Picking a file has the host store a copy; browsing and typing are zero-copy and read your original file in place. The plugin never uploads anything.
+- **Built-in public-domain library (434 titles)**: the catalogue ships with the plugin; the text is fetched only when you click download, and is fully offline afterwards. Every title is a public-domain work whose author died more than 50 years ago, sourced from Project Gutenberg. See [how the public-domain library works](#how-the-public-domain-library-works).
 - **Three books built in**: three novels land on the shelf automatically the first time you open the sidebar — no file hunting, no path config. Remove them if you want; they stay removed.
 - **Chapter splitting**: recognises `第 N 章 / 节 / 回 / 卷 / 篇` headings, with a length-based fallback.
 - **Encoding detection**: UTF-8 / UTF-8 BOM / UTF-16LE / UTF-16BE / GB18030.
@@ -42,8 +53,9 @@ This release turns the AI reading companion into something you actually use, and
 - **Reading progress**: chapter index and scroll ratio are written back and restored on reopen.
 - **Five colour schemes**: white / eye-care green / sepia / dark grey / pure black, matching novel-reader's `body[data-theme]` names and colours.
 - **Shares data with novel-reader**: reads and writes `books.json`, `settings.json` and `annotations/*.json` under `%APPDATA%/novel-reader`, so theme and progress stay in sync with the desktop app.
-- **Zero runtime dependencies**: only Node built-ins and services the DSH host already provides. No third-party dependency. The plugin makes no network request of its own, except the AI companion you switch on yourself.
+- **Zero runtime dependencies**: only Node built-ins and services the DSH host already provides. No third-party dependency. The plugin goes online in exactly two cases: you switch the AI companion on, or you click "Download" in the public-domain library.
 - **AI companion (off by default)**: once switched on, the AI roasts whatever you just read every few minutes, in four styles (roast / warm / detective / slacker), or on demand with "say it now". Switching it on makes it speak immediately — you do **not** have to open the panel first — and the companion character plus its speech bubble stay in the corner. Pick a model from the providers registered in DSH, or supply your own OpenAI-compatible endpoint and API key. Off means the model is never called. See [docs/ai-companion.md](docs/ai-companion.md).
+docs/public-domain-library.md  public-domain library: how the catalogue is generated, the naming rule, text unwrapping
 
 ### How the bundled books work
 
@@ -54,6 +66,21 @@ The bundle ships a `books/` directory (about 7.3 MB, three txt files). The plugi
 3. That **in-data-dir copy path** is what goes into `books.json`, so the shelf shows them.
 
 Three hard rules: idempotent (dedup by title, never added twice), never breaks the shelf (a failed copy only logs a `console.warn`), and **once you delete a bundled book it stays deleted** (its title is recorded in `removed-bundled.json`). Tests point the bundle directory at a sandbox via the `NOVEL_SHELF_BOOKS_DIR` environment variable, so the unit tests do not depend on the real novels in the repo.
+
+### How the public-domain library works
+
+Behind the library button in the shelf toolbar is `catalog/zh.json` — **a catalogue only, no text**: 44 KB, 434 entries, each `{id, title, author, downloads, repo}`. The text is fetched on demand:
+
+1. Click "Download" → `catalog.download` looks the entry up by `id`.
+2. It tries four jsDelivr edges in turn (`cdn` → `gcore` → `testingcf` → `fastly`) at `https://<host>/gh/GITenberg/<repo>@master/<id>-0.txt`.
+3. The bytes come back with Gutenberg's licence header, `Produced by` line, `*** START/END ***` markers and file-naming note stripped, leaving only the text.
+4. It is stored at `%APPDATA%/novel-reader/public-domain/<id>-<title>.txt` and enters the shelf through the same `addBookAt` path local imports use.
+
+**Why GITenberg**: the official Project Gutenberg site and the usual mirrors are unreachable on some networks, while GITenberg is its GitHub mirror organisation, so jsDelivr's CDN can serve the files. Repo names are built by replacing every non-alphanumeric character in the title with one `-`; titles with subtitles miss that rule, so catalogue generation falls back to a GitHub search (345 of 434 resolved by rule, 89 by search). The generation approach is documented under `docs/`; it does not run at runtime.
+
+**Why a catalogue and not the texts**: the 434 texts come to roughly 900 MB — too big to ship and pointless, since most people read a handful of them.
+
+**Licensing**: all titles are public-domain works (author dead more than 50 years). The plugin itself is MIT and claims no rights over that text.
 
 ## Install
 
@@ -89,16 +116,17 @@ dsh plugin --profile desktop add file:<tgz path>
 1. **Open the right sidebar**: click the right-column button in the top-right of the DSH window.
 2. **Pick the "小说书架" tab**: choose it in the tab bar at the top of the right sidebar to reach the shelf.
 3. **Three books are already there**: on the first open the three bundled novels are copied out of the plugin and added to the shelf automatically. Click one to start reading right away.
-4. **Add more books**: hit the **`+`** button in the toolbar and pick one of three routes —
+4. **Want a classic: use the library button**. The book icon in the toolbar opens the **public-domain library** with all 434 titles; search by title or author (say "Red Chamber"), click "Download" on a row, and a second later the book is on your shelf. Downloaded rows are marked as already on the shelf, and clicking again will not add a duplicate.
+5. **Add more books**: hit the **`+`** button in the toolbar and pick one of three routes —
    - **Pick a file**: click "Pick file", or just drop a txt onto the panel. The browser only hands the page bytes (it stopped exposing real paths long ago), so this route has the host store a copy under `%APPDATA%/novel-reader/imported/` and register that. The copy carries the first 16 hex digits of the content hash in its name, so importing the same file twice will not create a second book.
    - **Browse folders**: click "Browse folders"; the host lists the directory itself (one level, `.txt` only) and clicking "Import" adds the real path with **zero copying**. Web-novel folders often hold thousands of files, hence one level and no recursion.
    - **Type a path**: enter an absolute path in the shelf's bottom input (e.g. `D:\books\foo.txt`) and press Enter — exactly equivalent to browsing.
-5. **Start reading**: click a title — the chapter text appears directly in the right sidebar.
-6. **Navigate**: "上一章 / 下一章" switch chapters, the catalogue button next to the title opens the chapter list, and the search box runs a full-text search over the book (press Enter; a hit reports the chapter name plus a context snippet).
-7. **Tune the page**: the bottom slider changes the font size, the five swatches switch the background (white / eye-care / sepia / dark grey / pure black).
-8. **Progress is saved for you**: the chapter index and scroll ratio are written to `%APPDATA%/novel-reader/annotations/<id>.json`, so reopening lands you where you left off.
-9. **Want the companion**: click **"AI 陪读"** at the bottom, flip the switch, and the first remark arrives right away; the companion character shows up in the corner and clicking it opens the bubble. The interval and the style live in the same panel.
-10. **Change the model**: click **"模型"** at the bottom, pick one of the providers registered in DSH, or fill in your own OpenAI-compatible endpoint and API key. "测试" sends one real minimal request — a sample on success, and on failure it names the route and the reason. With nothing configured you get the DSH default model.
+6. **Start reading**: click a title — the chapter text appears directly in the right sidebar.
+7. **Navigate**: "上一章 / 下一章" switch chapters, the catalogue button next to the title opens the chapter list, and the search box runs a full-text search over the book (press Enter; a hit reports the chapter name plus a context snippet).
+8. **Tune the page**: the bottom slider changes the font size, the five swatches switch the background (white / eye-care / sepia / dark grey / pure black).
+9. **Progress is saved for you**: the chapter index and scroll ratio are written to `%APPDATA%/novel-reader/annotations/<id>.json`, so reopening lands you where you left off.
+10. **Want the companion**: click **"AI 陪读"** at the bottom, flip the switch, and the first remark arrives right away; the companion character shows up in the corner and clicking it opens the bubble. The interval and the style live in the same panel.
+11. **Change the model**: click **"模型"** at the bottom, pick one of the providers registered in DSH, or fill in your own OpenAI-compatible endpoint and API key. "测试" sends one real minimal request — a sample on success, and on failure it names the route and the reason. With nothing configured you get the DSH default model.
 
 > The right sidebar is narrow — widen the window for a more comfortable reading column.
 
@@ -121,6 +149,7 @@ Useful background if you want to modify the plugin yourself:
 | `%APPDATA%/novel-reader/books.json` | Shelf (path, name, size, added time) |
 | `%APPDATA%/novel-reader/books/` | Local copies of the three bundled books (copied out of the bundle on first shelf read) |
 | `%APPDATA%/novel-reader/imported/` | Copies of books added via "Pick file" / drag-and-drop; removing such a book from the shelf deletes its copy here — **your original file is never touched** |
+| `%APPDATA%/novel-reader/public-domain/` | Books downloaded from the public-domain library, named `<Gutenberg id>-<title>.txt`; fully readable offline once downloaded, and the copy is deleted when you remove the book from the shelf |
 | `%APPDATA%/novel-reader/removed-bundled.json` | Titles of bundled books you removed — they are never auto-installed again |
 | `%APPDATA%/novel-reader/settings.json` | Theme, font size, line height, last read book |
 | `%APPDATA%/novel-reader/annotations/<id>.json` | Highlights and reading progress per book |
@@ -132,7 +161,9 @@ When a JSON file is corrupt the plugin first backs it up as `*.corrupt-<timestam
 
 ## Privacy
 
-- All data stays in the local plugin data directory. **With the AI companion off, the plugin makes no network request at all**; with it on, only the short passage you just read (about six paragraphs, 1200 characters at most) is sent to the one model provider you configured inside DSH — no third-party relay. If the text must not leave your machine, leave the switch off.
+- All data stays in the local plugin data directory.
+- **With the AI companion off and no library download running, the plugin makes no network request at all.** With the companion on, only the short passage you just read (about six paragraphs, 1200 characters at most) is sent to the one model provider you configured inside DSH — no third-party relay. If the text must not leave your machine, leave the switch off.
+- **Library downloads only touch a CDN**: when you click "Download", the plugin asks a jsDelivr edge (`cdn` / `gcore` / `testingcf` / `fastly`) for that one public-domain text. The request carries the Gutenberg book id and repo name only — no machine details, no shelf, no reading history. Once downloaded the book stays local and the plugin goes quiet again.
 - The host route uses the official trust fence (`ctx.connection.requestRejection`) and rejects cross-site requests, so a bare command-line call is denied.
 - Only `.txt` is accepted, request bodies are capped at 1 MiB, and the API method allow-list uses `Object.hasOwn` so prototype members cannot be reached.
 - The companion log `%APPDATA%/novel-reader/plugin-client.log` records tags and counters only, never the text.
@@ -146,6 +177,7 @@ lib/host.js            host half: file IO, encoding detection, chapter splitting
 lib/client.js          client half: right-sidebar tab registration, shelf / reader / companion panel / model panel, five theme palettes
 assets/reader-avatar.png  the companion character (floating in the corner, ~114 KB PNG)
 books/                 the three bundled txt files (~7.3 MB, shipped with the bundle, copied to the data dir on first run)
+catalog/zh.json        public-domain catalogue (434 titles, 44 KB, metadata only — no text)
 locale/zh.json         Chinese strings
 locale/en.json         English strings
 docs/ai-companion.md    how the AI companion is configured and what it sends out

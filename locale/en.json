@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Novel Shelf",
-    "description": "Read local TXT novels in the DSH right sidebar, with an AI companion that roasts whatever you just read — on a timer or on demand, four styles, a character and speech bubble floating in the corner. Pick any model provider registered in DSH, or your own OpenAI-compatible endpoint and API key; off by default. Three novels ship in the box, and chapters, progress and themes are shared with the desktop novel-reader app."
+    "description": "Right-sidebar novel shelf: local txt import, a 434-title public-domain library, optional AI companion."
   }
 }

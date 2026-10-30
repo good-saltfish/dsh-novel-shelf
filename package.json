@@ -1,7 +1,7 @@
 {
   "name": "dsh-novel-shelf",
-  "version": "0.3.0",
-  "description": "在 DSH 右侧栏看本地 txt 小说：选文件 / 浏览目录 / 填路径三种方式加书，AI 伴读边读边吐槽：定时就着刚读到的内容说一句，也能随时点「现在就说」，四种风格可选，右下角常驻陪读人物与气泡；模型可在 DSH 已注册的 provider 里挑，也能自填 OpenAI 兼容端点与 API key，默认关闭。书架自带三本小说开箱即读，章节、进度与主题和桌面版 novel-reader 共用。",
+  "version": "0.4.0",
+  "description": "DSH 右侧栏小说书架：本地 txt 三条路导入，内置 434 本公版中文书库（点下载即入架），可选 AI 陪读吐槽。A DSH right-sidebar novel shelf: import local txt three ways, a built-in 434-title public-domain Chinese library, and an optional AI reading companion.",
   "type": "module",
   "main": "./lib/host.js",
   "exports": {
@@ -15,6 +15,7 @@
   "files": [
     "lib",
     "locale",
+    "catalog",
     "icon.svg",
     "assets",
     "cordis.patch.yml",

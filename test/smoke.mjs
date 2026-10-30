@@ -127,6 +127,26 @@ const RESPONSES = {
     }),
   },
   'library.remove': { value: { books: [] } },
+  /* 公版书库：目录按 query 过滤，下载返回 added=true 并带书名。 */
+  'catalog.list': {
+    byBody: (body) => {
+      const all = [
+        { id: '23962', title: '西遊記', author: '吳承恩', downloads: 11629, inShelf: false },
+        { id: '24264', title: '紅樓夢', author: '曹雪芹', downloads: 9312, inShelf: false },
+      ];
+      const q = String(body.query || '').trim();
+      const books = q ? all.filter((b) => b.title.includes(q) || b.author.includes(q)) : all;
+      return { total: 434, source: 'Project Gutenberg', books };
+    },
+  },
+  'catalog.download': {
+    byBody: (body) => ({
+      added: true,
+      title: body.id === '24264' ? '紅樓夢' : '西遊記',
+      path: 'C:\\Users\\me\\AppData\\Roaming\\novel-reader\\public-domain\\' + body.id + '-x.txt',
+      books: [{ id: 'pd1', name: '西遊記', path: 'C:/pd.txt', size: 2264071 }],
+    }),
+  },
   'reader.session.get': { value: {} },
   'reader.session.set': { value: {} },
   'companion.get': { get value() { return { ...companionState }; } },
@@ -634,6 +654,66 @@ findAll(tree, 'nr-btn').find((b) => b.props.title === '关闭').props.onClick();
 for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
 assert.equal(findAll(tree, 'nr-import-card').length, 0, '关闭后导入面板应消失');
 console.log('✔ 导入书籍三条路全部走通: 拖拽上传 / 浏览目录零复制 / 客户端拦截 / scan 失败提示');
+
+/* ------------------------------------------------------------ 公版书库 UI */
+
+/* 书架工具栏点「公版书库」→ 列目录 → 搜书 → 下载入库 → 返回书架 */
+requests.length = 0;
+findAll(tree, 'nr-btn').find((b) => b.props.title === '公版书库').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.equal(findAll(tree, 'nr-import-card').length, 1, '公版书库面板要出现');
+assert.ok(requests.some((r) => r.method === 'catalog.list'), '打开面板必须拉目录');
+const libRows = findAll(tree, 'nr-brow-file');
+assert.equal(libRows.length, 2, '目录里两本都要列出来，实际 ' + libRows.length);
+assert.ok(String(libRows[0].props.children[0].props.children).includes('西遊記'), '要显示书名');
+
+/* 搜索：输入框回车 → 带 query 再拉一次，结果收敛到一条 */
+requests.length = 0;
+findAll(tree, 'nr-input')[0].props.onChange({ target: { value: '紅樓' } });
+for (let i = 0; i < 2; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+findAll(tree, 'nr-input')[0].props.onKeyDown({ key: 'Enter' });
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+const searchReq = requests.find((r) => r.method === 'catalog.list');
+assert.ok(searchReq, '搜索必须重新拉目录');
+assert.equal(searchReq.body.query, '紅樓', '搜索词要传上去');
+assert.equal(findAll(tree, 'nr-brow-file').length, 1, '搜「紅樓」应只剩一本');
+assert.ok(String(findAll(tree, 'nr-brow-file')[0].props.children[0].props.children).includes('紅樓夢'));
+
+/* 下载：点「下载」→ 调 catalog.download → 该行变「已加入书架」 */
+requests.length = 0;
+const dlBtn = findAll(tree, 'nr-btn').find((b) => b.props.children === '下载');
+assert.ok(dlBtn, '每行都要有下载按钮');
+dlBtn.props.onClick();
+for (let i = 0; i < 6; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+const dlReq = requests.find((r) => r.method === 'catalog.download');
+assert.ok(dlReq, '点下载必须调 catalog.download');
+assert.equal(dlReq.body.id, '24264', '要传对书目 id');
+assert.equal(findAll(tree, 'nr-badge').length >= 1, true, '下载后该行要标「已加入书架」');
+assert.ok(findAll(tree, 'nr-hint').some((n) => String(n.props.children).includes('紅樓夢')), '下载成功要给提示');
+
+/* 下载失败要在面板内报错，不许静默。
+   注意：剛下载成功的「紅樓夢」已标成「已加入书架」，那一行没有下载按钮了，
+   所以这里先搜回「西遊記」，拿它的下载按钮来试失败路径。 */
+requests.length = 0;
+findAll(tree, 'nr-input')[0].props.onChange({ target: { value: '西遊' } });
+for (let i = 0; i < 2; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+findAll(tree, 'nr-input')[0].props.onKeyDown({ key: 'Enter' });
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+const dlOriginal = RESPONSES['catalog.download'];
+RESPONSES['catalog.download'] = { ok: false, message: '下载失败（几个镜像都不通）' };
+const failBtn = findAll(tree, 'nr-btn').find((b) => b.props.children === '下载');
+assert.ok(failBtn, '西遊記还没下载，应有下载按钮');
+failBtn.props.onClick();
+for (let i = 0; i < 6; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.ok(findAll(tree, 'nr-error').length >= 1, '下载失败必须显示错误');
+assert.equal(findAll(tree, 'nr-import-card').length, 1, '失败后面板仍在');
+RESPONSES['catalog.download'] = dlOriginal;
+
+/* 返回书架 */
+findAll(tree, 'nr-btn').find((b) => b.props.title === '返回书架').props.onClick();
+for (let i = 0; i < 4; i += 1) { await flush(); tree = await renderPass(ReactStub.createElement(BodyComponent, {})); }
+assert.equal(findAll(tree, 'nr-import-card').length, 0, '返回后公版书库面板应消失');
+console.log('✔ 公版书库走通: 列目录 / 搜索 / 下载入库 / 失败提示 / 返回书架');
 
 /* 打开一本书：主题在阅读页不得丢 */
 requests.length = 0;
