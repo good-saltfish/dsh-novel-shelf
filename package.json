@@ -1,6 +1,6 @@
 {
   "name": "dsh-novel-shelf",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "DSH 右侧栏小说书架：本地 txt 三条路导入，内置 434 本公版中文书库（点下载即入架），可选 AI 陪读吐槽。A DSH right-sidebar novel shelf: import local txt three ways, a built-in 434-title public-domain Chinese library, and an optional AI reading companion.",
   "type": "module",
   "main": "./lib/host.js",
