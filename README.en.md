@@ -10,6 +10,12 @@
 
 ![The whole DSH window with the "小说书架 / Novel Shelf" tab open in the right sidebar](docs/screenshot-full.png)
 
+## What's new in v0.4.3
+
+- **Corrected version declaration**: `engines.dsh` used to be `>=0.2.0-rc.2`, which under semver **does not cover** prereleases such as `0.2.1-rc.5` (a prerelease only matches when its major.minor.patch equals the baseline). It is now `>=0.2.0-0 <0.3.0-0 || >=0.2.1-0 <0.3.0-0`, covering the prereleases of both the 0.2.0 and 0.2.1 lines while explicitly excluding the untested 0.3.0.
+- **Added `dsh.compatibility`**: lists the DSH versions actually tested (0.2.0-rc.2 / 0.2.1-rc.1 / 0.2.1-rc.5) so the market and the plugin manager can read them directly.
+- Feature-identical to the previous release; no code changes.
+
 ## What's new in v0.4.0
 
 This release fixes the most fundamental problem: **readers should not have to hunt for books themselves**.
